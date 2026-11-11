@@ -7,7 +7,7 @@ namespace SWGLCharacterCreator;
 public sealed record Img(IntPtr Id, int Width, int Height, string Source, Texture2D Texture);
 
 /// <summary>
-/// Loads png/tga/jpg assets (loose files under SWGL/ win over pk3 entries) as ImGui textures.
+/// Loads png/tga/jpg assets (staged in-memory edits and loose files win over pk3 entries) as ImGui textures.
 /// Textures dropped by <see cref="Invalidate"/> are disposed on the next <see cref="Flush"/>
 /// so that a texture is never destroyed while the current frame still references it.
 /// </summary>
@@ -18,7 +18,8 @@ public sealed class ImageStore
     private readonly GraphicsDevice _gd;
     private readonly ImGuiRenderer _ui;
     private readonly Func<Pk3Index?> _index;
-    private readonly Func<string?> _gameDir;
+    private readonly Action<string, byte[]> _stage;
+    private readonly Action<string> _unstage;
     private readonly Dictionary<string, Img?> _cache = new();
 
     /// <summary>Incremented whenever cached textures are dropped; holders of textures must reload.</summary>
@@ -26,9 +27,9 @@ public sealed class ImageStore
     private readonly List<(Img img, Texture2D tex)> _live = new();
     private readonly List<(Img img, Texture2D tex)> _dead = new();
 
-    public ImageStore(GraphicsDevice gd, ImGuiRenderer ui, Func<Pk3Index?> index, Func<string?> gameDir)
+    public ImageStore(GraphicsDevice gd, ImGuiRenderer ui, Func<Pk3Index?> index, Action<string, byte[]> stage, Action<string> unstage)
     {
-        _gd = gd; _ui = ui; _index = index; _gameDir = gameDir;
+        _gd = gd; _ui = ui; _index = index; _stage = stage; _unstage = unstage;
     }
 
     public static string Normalize(string path) => path.Trim().Replace('\\', '/').TrimStart('/');
@@ -109,7 +110,7 @@ public sealed class ImageStore
     }
 
     /// <summary>
-    /// Writes <paramref name="sourceFile"/> as the loose asset for <paramref name="gamePath"/>,
+    /// Writes <paramref name="sourceFile"/> as the staged asset for <paramref name="gamePath"/>,
     /// converting between png and tga when the extensions differ. Returns the game path actually used.
     /// </summary>
     public string Import(string gamePath, string sourceFile)
@@ -119,16 +120,16 @@ public sealed class ImageStore
     }
 
     /// <summary>
-    /// Copies the current image of <paramref name="oldPath"/> to <paramref name="newPath"/> as a loose file.
-    /// A loose source file is deleted; a source inside a pk3 cannot be removed and stays there.
+    /// Copies the current image of <paramref name="oldPath"/> to <paramref name="newPath"/> as a staged change.
+    /// A source that is itself only a staged (in-memory) change is dropped; a source inside a pk3 stays there.
     /// </summary>
     public string Move(string oldPath, string newPath)
     {
         var entry = FindEntry(oldPath) ?? throw new InvalidOperationException("The current image was not found.");
         var result = Write(Pk3Reader.ReadBytes(entry), System.IO.Path.GetExtension(entry.Path).ToLowerInvariant(), newPath);
-        if (entry.IsLoose && !string.Equals(entry.Path, result, StringComparison.OrdinalIgnoreCase))
+        if (entry.Memory != null && !string.Equals(entry.Path, result, StringComparison.OrdinalIgnoreCase))
         {
-            try { File.Delete(entry.Pk3FullPath); } catch { /* leave it in place */ }
+            _unstage(entry.Path);
             _index()?.Remove(entry.Path);
         }
         Invalidate();
@@ -139,7 +140,6 @@ public sealed class ImageStore
     {
         var target = Normalize(gamePath);
         if (target.Length == 0) throw new InvalidOperationException("The image path is empty.");
-        var dir = _gameDir() ?? throw new InvalidOperationException("No SWGL folder selected.");
 
         var dstExt = System.IO.Path.GetExtension(target).ToLowerInvariant();
         if (dstExt.Length == 0) { target += srcExt; dstExt = srcExt; }
@@ -156,10 +156,7 @@ public sealed class ImageStore
             bytes = ms.ToArray();
         }
 
-        var path = GameLocator.LoosePath(dir, target);
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-        File.WriteAllBytes(path, bytes);
-        _index()?.AddLoose(target, path);
+        _stage(target, bytes);
         Invalidate();
         return target;
     }

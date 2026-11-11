@@ -80,7 +80,7 @@ public sealed class ImGuiRenderer
         m[Keys.PageDown] = ImGuiKey.PageDown; m[Keys.Home] = ImGuiKey.Home; m[Keys.End] = ImGuiKey.End;
         m[Keys.Delete] = ImGuiKey.Delete; m[Keys.Back] = ImGuiKey.Backspace; m[Keys.Enter] = ImGuiKey.Enter;
         m[Keys.Escape] = ImGuiKey.Escape; m[Keys.Space] = ImGuiKey.Space;
-        m[Keys.A] = ImGuiKey.A; m[Keys.C] = ImGuiKey.C; m[Keys.V] = ImGuiKey.V; m[Keys.X] = ImGuiKey.X;
+        m[Keys.A] = ImGuiKey.A; m[Keys.S] = ImGuiKey.S; m[Keys.C] = ImGuiKey.C; m[Keys.V] = ImGuiKey.V; m[Keys.X] = ImGuiKey.X;
         m[Keys.Y] = ImGuiKey.Y; m[Keys.Z] = ImGuiKey.Z;
     }
 

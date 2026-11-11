@@ -25,6 +25,9 @@ public partial class Game1 : Game
     private volatile bool _indexing;
     private (int done, int total, string current) _progress;
     private string _status = NoFolderMessage;
+    private DefStore? _defs;   // variant <-> _def.cfg bindings, created with the index
+    private GameDataCatalog? _catalog;   // weapons / sabers / NPC types from the game data, created with the index
+    private PendingChanges _pending = new();   // edits staged in memory, reset whenever the folder is re-indexed
     private int _loadGeneration;   // bumped by every SetGameDir so that a stale indexing run is ignored
 
     private static readonly string NoFolderMessage =
@@ -66,7 +69,8 @@ public partial class Game1 : Game
     protected override void LoadContent()
     {
         _imgui = new ImGuiRenderer(this);
-        _images = new ImageStore(GraphicsDevice, _imgui, () => _index, () => _gameDir);
+        _images = new ImageStore(GraphicsDevice, _imgui, () => _index,
+            (p, b) => { _pending.Stage(p, b); _index!.AddMemory(p, b); }, p => _pending.Remove(p));
         _viewer = new ModelViewer(GraphicsDevice, _imgui, _images);
 
         var saved = _settings.GameDataPath;
@@ -90,12 +94,31 @@ public partial class Game1 : Game
         _openBrowser = true;
     }
 
+    protected override void OnExiting(object sender, ExitingEventArgs args)
+    {
+        if (!_allowExit && HasPendingChanges())
+        {
+            args.Cancel = true;   // window closed with unsaved edits: ask first
+            RunOrConfirm(QuitNow);
+        }
+        base.OnExiting(sender, args);
+    }
+
+    private void QuitNow()
+    {
+        _allowExit = true;
+        Exit();
+    }
+
     private void SetGameDir(string dir)
     {
         _gameDir = dir;
+        _pending = new PendingChanges();
         _settings.GameDataPath = dir;
         _settings.Save();
         _index = null;
+        _defs = null;
+        _catalog = null;
         _roots = new();
         _selected = null;
         _expanded.Clear();
@@ -133,6 +156,10 @@ public partial class Game1 : Game
 
                 if (generation != _loadGeneration) return; // another folder was selected meanwhile
 
+                var defs = new DefStore(index);
+                foreach (var cf in chaNode.Children.Where(c => c.File!.Error == null)) defs.Bind(cf.File!.Config);
+                _defs = defs;
+                _catalog = GameDataCatalog.Build(index);
                 _index = index;
                 _roots = new List<Node> { facNode, chaNode };
                 _status = index.Pk3Count == 0
@@ -152,6 +179,8 @@ public partial class Game1 : Game
             }
         });
     }
+
+    private static bool IsChaPath(string path) => path.EndsWith(".cha", StringComparison.OrdinalIgnoreCase);
 
     private static ParsedFile LoadFile(Pk3Entry entry)
     {
@@ -185,14 +214,17 @@ public partial class Game1 : Game
             if (ImGui.BeginMenu("File"))
             {
                 if (ImGui.MenuItem("Select SWGL folder...")) _openBrowser = true;
-                if (ImGui.MenuItem("Re-index", null, false, _gameDir != null && !_indexing)) SetGameDir(_gameDir!);
+                if (ImGui.MenuItem("Re-index", null, false, _gameDir != null && !_indexing)) RunOrConfirm(() => SetGameDir(_gameDir!));
                 ImGui.Separator();
-                if (ImGui.MenuItem("Quit")) Exit();
+                if (ImGui.MenuItem("Save changes", "Ctrl+S", false, HasPendingChanges() && !_indexing)) BeginSave();
+                ImGui.Separator();
+                if (ImGui.MenuItem("Quit")) RunOrConfirm(QuitNow);
                 ImGui.EndMenu();
             }
             ImGui.EndMainMenuBar();
         }
 
+        HandleSaveShortcut();
         if (_openBrowser)
         {
             _openBrowser = false;
@@ -207,6 +239,7 @@ public partial class Game1 : Game
         }
         DrawImagePicker();
         DrawModals();
+        DrawSaveModals();
 
         var vp = ImGui.GetMainViewport();
         float menuH = ImGui.GetFrameHeight();
@@ -298,6 +331,7 @@ public partial class Game1 : Game
 
         ImGui.SameLine();
         var label = n.Kind == NodeKind.Category ? $"{n.Label} ({n.Children.Count})" : n.Label;
+        if (n.Kind == NodeKind.Block && n.Block!.Type == "Variant" && _defs?.IsDirty(n.Block) == true) label += " *";
         if (ImGui.Selectable(label, _selected == n)) _selected = n;
         DrawNodeContextMenu(n);
         DrawTransferDragDrop(n);
@@ -361,6 +395,24 @@ public partial class Game1 : Game
                 break;
 
             case NodeKind.Block:
+                if (n.Block!.Type == "Variant" && _defs != null && _catalog != null)
+                {
+                    if (!ImGui.BeginTabBar("##variant")) break;
+                    if (ImGui.BeginTabItem("Variant"))
+                    {
+                        DrawFileHeader(n.File!);
+                        DrawBlockFields(n);
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem((_defs.IsDirty(n.Block) ? "Config *" : "Config") + "###config"))
+                    {
+                        DrawFileHeader(n.File!);
+                        DrawConfigTab(n);
+                        ImGui.EndTabItem();
+                    }
+                    ImGui.EndTabBar();
+                    break;
+                }
                 DrawFileHeader(n.File!);
                 DrawBlockFields(n);
                 break;
@@ -373,13 +425,12 @@ public partial class Game1 : Game
         ImGui.TextDisabled($"Source: {f.Entry.Pk3Folder}/{f.Entry.Pk3Name}");
         if (f.Error != null) ImGui.TextColored(new Vec4(1f, 0.4f, 0.4f, 1f), "Read error: " + f.Error);
 
-        if (!f.Dirty) ImGui.BeginDisabled();
-        if (ImGui.Button("Save")) SaveFile(f);
+        bool clean = !f.Dirty;   // captured once: RevertFile clears Dirty before EndDisabled
+        if (clean) ImGui.BeginDisabled();
+        if (ImGui.Button("Discard file changes")) RevertFile(f);
+        if (clean) ImGui.EndDisabled();
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Writes a loose file to SWGL/" + f.Entry.Path + " (pk3 files are never modified).");
-        ImGui.SameLine();
-        if (ImGui.Button("Discard changes")) RevertFile(f);
-        if (!f.Dirty) ImGui.EndDisabled();
+            ImGui.SetTooltip("Reverts this file to its last saved state. Also discards the Config changes of this file's variants.");
         ImGui.Separator();
     }
 
@@ -480,39 +531,20 @@ public partial class Game1 : Game
 
     // ---------------------------------------------------------------- saving
 
-    private void SaveFile(ParsedFile f)
-    {
-        var loose = WriteLoose(f.Entry.Path, f.Config.Serialize());
-        if (loose == null) return;
-        f.Dirty = false;
-        f.Entry = loose; // later reverts reload the saved loose file
-        f.IsNew = false;
-    }
-
-    /// <summary>pk3 files are never modified: edits are written as loose files under SWGL/ and registered in the index.</summary>
-    private Pk3Entry? WriteLoose(string entryPath, string text)
-    {
-        try
-        {
-            var path = GameLocator.LoosePath(_gameDir!, entryPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, text, System.Text.Encoding.Latin1);
-            _status = "Saved: " + path;
-            return _index!.AddLoose(entryPath, path);
-        }
-        catch (Exception ex)
-        {
-            _status = "Save failed: " + ex.Message;
-            return null;
-        }
-    }
-
     private void RevertFile(ParsedFile f)
     {
         var fresh = f.IsNew ? new ParsedFile { Entry = f.Entry } : LoadFile(f.Entry); // a never-saved file reverts to empty
+        if (f.IsNew)
+        {   // the content captured at creation/rename must not be saved any more
+            _pending.Stage(f.Entry.Path, Array.Empty<byte>());
+            f.Entry = _index!.AddMemory(f.Entry.Path, Array.Empty<byte>());
+        }
+        if (IsChaPath(f.Entry.Path)) _defs?.Unbind(f.Config);
         f.Config = fresh.Config;
         f.Error = fresh.Error;
         f.Dirty = false;
+        if (IsChaPath(f.Entry.Path) && f.Error == null) _defs?.Bind(f.Config);
+        if (IsChaPath(f.Entry.Path)) _defs?.Prune(ChaConfigs());
 
         // Rebuild the file's subtree against the reloaded blocks, keeping the file node itself.
         var node = _roots.SelectMany(r => r.Children).First(c => c.File == f);
@@ -579,8 +611,8 @@ public partial class Game1 : Game
             else
             {
                 _browseError = "";
-                SetGameDir(resolved);
                 ImGui.CloseCurrentPopup();
+                RunOrConfirm(() => SetGameDir(resolved));
             }
         }
         ImGui.SameLine();

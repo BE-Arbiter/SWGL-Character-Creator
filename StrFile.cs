@@ -27,7 +27,7 @@ public sealed class StrFile
 
     private static readonly Regex QuotedLine = new("^(\\s*\\S+\\s+\")(.*)(\"\\s*)$", RegexOptions.Compiled);
 
-    public required Pk3Entry Entry { get; init; }
+    public required Pk3Entry Entry { get; set; }
     public List<StrEntry> Entries = new();
     public bool Dirty;
     public string? Error;
