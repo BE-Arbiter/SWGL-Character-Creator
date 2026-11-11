@@ -517,6 +517,7 @@ public partial class Game1
             _expanded.Add(n);
             _selected = node;
             f.Dirty = true;
+            OpenNewVariantConfig(v);
         }
     }
 
@@ -638,6 +639,7 @@ public partial class Game1
         DrawModelModal();
         DrawTransferModal();
         DrawFileNameModal();
+        DrawNewVariantConfigModal();
     }
 
     private void ModalError()

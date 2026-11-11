@@ -315,6 +315,7 @@ public partial class Game1 : Game
 
         ImGui.SameLine();
         var label = n.Kind == NodeKind.Category ? $"{n.Label} ({n.Children.Count})" : n.Label;
+        if (n.Kind == NodeKind.Block && n.Block!.Type == "Variant" && _defs?.IsDirty(n.Block) == true) label += " *";
         if (ImGui.Selectable(label, _selected == n)) _selected = n;
         DrawNodeContextMenu(n);
         DrawTransferDragDrop(n);
@@ -378,6 +379,24 @@ public partial class Game1 : Game
                 break;
 
             case NodeKind.Block:
+                if (n.Block!.Type == "Variant" && _defs != null && _catalog != null)
+                {
+                    if (!ImGui.BeginTabBar("##variant")) break;
+                    if (ImGui.BeginTabItem("Variant"))
+                    {
+                        DrawFileHeader(n.File!);
+                        DrawBlockFields(n);
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem((_defs.IsDirty(n.Block) ? "Config *" : "Config") + "###config"))
+                    {
+                        DrawFileHeader(n.File!);
+                        DrawConfigTab(n);
+                        ImGui.EndTabItem();
+                    }
+                    ImGui.EndTabBar();
+                    break;
+                }
                 DrawFileHeader(n.File!);
                 DrawBlockFields(n);
                 break;
