@@ -24,7 +24,12 @@ public partial class Game1 : Game
     private List<Node> _roots = new();
     private volatile bool _indexing;
     private (int done, int total, string current) _progress;
-    private string _status = "No SWGL folder selected (File > Select SWGL folder...).";
+    private string _status = NoFolderMessage;
+    private int _loadGeneration;   // bumped by every SetGameDir so that a stale indexing run is ignored
+
+    private static readonly string NoFolderMessage =
+        $"No SWGL game folder selected. Use File > Select SWGL folder... and choose the folder that contains {GameLocator.ExeName} " +
+        "(the \"GameData\" folder of the Steam game \"Jedi Academy - SWGL_DEV\").";
 
     // Explorer / editor state
     private string _filter = "";
@@ -64,11 +69,25 @@ public partial class Game1 : Game
         _images = new ImageStore(GraphicsDevice, _imgui, () => _index, () => _gameDir);
         _viewer = new ModelViewer(GraphicsDevice, _imgui, _images);
 
-        var start = _settings.GameDataPath;
-        if (string.IsNullOrEmpty(start)) start = GameLocator.DefaultPath;
-        _browsePath = _browseInput = start;
+        var saved = _settings.GameDataPath;
+        var start = string.IsNullOrEmpty(saved) ? GameLocator.DefaultPath : saved;
         var resolved = GameLocator.Resolve(start);
-        if (resolved != null) SetGameDir(resolved);
+        if (resolved == null && !string.IsNullOrEmpty(saved) && saved != GameLocator.DefaultPath)
+            resolved = GameLocator.Resolve(GameLocator.DefaultPath); // the remembered folder is gone: try the Steam default
+
+        if (resolved != null)
+        {
+            _browsePath = _browseInput = resolved;
+            SetGameDir(resolved);
+            return;
+        }
+
+        // No access to the game: ask for the folder right away and say exactly what is needed.
+        _browsePath = _browseInput = Directory.Exists(start) ? start : "";
+        _status = string.IsNullOrEmpty(saved)
+            ? NoFolderMessage
+            : $"The previously selected folder is no longer valid: {GameLocator.ExeName} was not found in \"{saved}\". " + NoFolderMessage;
+        _openBrowser = true;
     }
 
     private void SetGameDir(string dir)
@@ -87,12 +106,15 @@ public partial class Game1 : Game
         _knownFactions = null;
         _knownTags = null;
         _factionTitles = null;
+        _modelFolders = null;
         _imageMatchesFor = "\u0000";
+        _pendingIndex = null;
         _indexing = true;
         _progress = (0, 1, "");
         _status = $"Indexing {dir}...";
+        int generation = ++_loadGeneration;
 
-        var progress = new Progress<(int, int, string)>(p => _progress = p);
+        var progress = new Progress<(int, int, string)>(p => { if (generation == _loadGeneration) _progress = p; });
         Task.Run(() =>
         {
             try
@@ -109,20 +131,24 @@ public partial class Game1 : Game
                         root.Children.Add(Node.BuildFile(pf));
                     }
 
+                if (generation != _loadGeneration) return; // another folder was selected meanwhile
+
                 _index = index;
                 _roots = new List<Node> { facNode, chaNode };
-                _status = $"{dir} - {index.Pk3Count} pk3, {index.Files.Count} files " +
+                _status = index.Pk3Count == 0
+                    ? $"{dir}: no .pk3 file found in its \"base\" and \"SWGL\" subfolders - is this really the SWGL GameData folder?"
+                    : $"{dir} - {index.Pk3Count} pk3, {index.Files.Count} files " +
                           $"({index.Overridden} overridden, {index.LooseCount} loose), " +
                           $"{facNode.Children.Count} .fac, {chaNode.Children.Count} .cha" +
                           (index.Errors.Count + errors > 0 ? $" - {index.Errors.Count + errors} error(s)" : "");
             }
             catch (Exception ex)
             {
-                _status = "Indexing failed: " + ex.Message;
+                if (generation == _loadGeneration) _status = "Indexing failed: " + ex.Message;
             }
             finally
             {
-                _indexing = false;
+                if (generation == _loadGeneration) _indexing = false;
             }
         });
     }
@@ -200,6 +226,7 @@ public partial class Game1 : Game
             {
                 ImGui.TextWrapped(_status);
                 if (_index != null) DrawWorkspace();
+                else if (_gameDir == null && ImGui.Button("Select SWGL folder...")) _openBrowser = true;
             }
         }
         ImGui.End();
@@ -226,6 +253,7 @@ public partial class Game1 : Game
             if (ImGui.BeginChild("##tree", new Vec2(0, 0)))
             {
                 foreach (var root in _roots) DrawNode(root, _filter.Length > 0);
+                ApplyPendingDrop(); // after the loop: a drop changes the lists being enumerated
                 if (_index!.Errors.Count > 0)
                 {
                     ImGui.Separator();
@@ -272,6 +300,7 @@ public partial class Game1 : Game
         var label = n.Kind == NodeKind.Category ? $"{n.Label} ({n.Children.Count})" : n.Label;
         if (ImGui.Selectable(label, _selected == n)) _selected = n;
         DrawNodeContextMenu(n);
+        DrawTransferDragDrop(n);
 
         if (expanded)
         {
@@ -302,11 +331,14 @@ public partial class Game1 : Game
         var img = _images.Get(icon.Value);
         if (img == null) return;
 
+        // Same top-right overlay as a variant's model preview.
+        var p0 = ImGui.GetCursorScreenPos();
         var avail = ImGui.GetContentRegionAvail();
-        float captionH = ImGui.GetTextLineHeightWithSpacing() * 2;
-        float scale = Math.Min(avail.X / img.Width, (avail.Y - captionH) / img.Height);
-        if (scale <= 0) return;
-        ImGui.Image(img.Id, new Vec2(img.Width * scale, img.Height * scale));
+        var q0 = new Vec2(p0.X + avail.X - PreviewIconSize - 8, p0.Y + 8);
+        var q1 = q0 + new Vec2(PreviewIconSize, PreviewIconSize);
+        var dl = ImGui.GetWindowDrawList();
+        dl.AddImage(img.Id, q0, q1);
+        dl.AddRect(q0, q1, ImGui.GetColorU32(new Vec4(1, 1, 1, 0.9f)));
         ImGui.TextDisabled($"{img.Width} x {img.Height}  -  {img.Source}");
     }
 
@@ -462,7 +494,7 @@ public partial class Game1 : Game
     {
         try
         {
-            var path = Path.Combine(_gameDir!, "SWGL", entryPath.Replace('/', Path.DirectorySeparatorChar));
+            var path = GameLocator.LoosePath(_gameDir!, entryPath);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, text, System.Text.Encoding.Latin1);
             _status = "Saved: " + path;
@@ -499,8 +531,10 @@ public partial class Game1 : Game
         bool open = true;
         if (!ImGui.BeginPopupModal("Select SWGL folder", ref open)) return;
 
-        ImGui.TextWrapped($"Choose the SWGL GameData folder (the one containing {GameLocator.ExeName}). " +
-                          "A parent folder or the GameData subfolder is also accepted.");
+        ImGui.TextWrapped($"Select the SWGL \"GameData\" folder: the folder that contains {GameLocator.ExeName} " +
+                          "and the \"base\" and \"SWGL\" subfolders.");
+        ImGui.TextDisabled($"Usually: {GameLocator.DefaultPath}");
+        ImGui.TextDisabled("The game's root folder (parent of GameData) is also accepted.");
 
         if (ImGui.Button("Up"))
         {
@@ -512,7 +546,7 @@ public partial class Game1 : Game
         if (ImGui.InputText("##path", ref _browseInput, 512, ImGuiInputTextFlags.EnterReturnsTrue))
         {
             if (Directory.Exists(_browseInput)) NavigateTo(_browseInput);
-            else _browseError = "Folder not found.";
+            else _browseError = $"Folder not found: {_browseInput}";
         }
 
         float footer = ImGui.GetFrameHeightWithSpacing() * 2 + 4;
@@ -520,6 +554,7 @@ public partial class Game1 : Game
         {
             var found = GameLocator.Resolve(_browsePath);
             if (found != null) ImGui.TextColored(new Vec4(0.4f, 1f, 0.4f, 1f), $"SWGL found: {found}");
+            else ImGui.TextColored(new Vec4(1f, 0.8f, 0.3f, 1f), $"{GameLocator.ExeName} not found in this folder yet - keep browsing.");
 
             if (string.IsNullOrEmpty(_browsePath))
                 foreach (var d in DriveInfo.GetDrives().Where(d => d.IsReady))
@@ -539,7 +574,8 @@ public partial class Game1 : Game
         if (ImGui.Button("Select this folder"))
         {
             var resolved = GameLocator.Resolve(_browsePath);
-            if (resolved == null) _browseError = $"{GameLocator.ExeName} not found here, in GameData, or in any parent folder.";
+            if (resolved == null) _browseError = $"{GameLocator.ExeName} was not found in this folder, in its \"GameData\" subfolder or in any parent folder. " +
+                                                 "Select the SWGL \"GameData\" folder.";
             else
             {
                 _browseError = "";

@@ -9,6 +9,17 @@
     <PublishReadyToRun>false</PublishReadyToRun>
     <TieredCompilation>false</TieredCompilation>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <Version>0.0.0-dev</Version>
+    <AssemblyName>SWGLCharacterCreator</AssemblyName>
+  </PropertyGroup>
+  <!-- dotnet publish -c Release -r win-x64 : one self-contained exe (runtime and native libraries included). -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationManifest>app.manifest</ApplicationManifest>

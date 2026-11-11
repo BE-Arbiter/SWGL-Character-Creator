@@ -156,7 +156,7 @@ public sealed class ImageStore
             bytes = ms.ToArray();
         }
 
-        var path = System.IO.Path.Combine(dir, "SWGL", target.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        var path = GameLocator.LoosePath(dir, target);
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, bytes);
         _index()?.AddLoose(target, path);

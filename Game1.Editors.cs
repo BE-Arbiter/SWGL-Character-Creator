@@ -105,6 +105,16 @@ public partial class Game1
         ImGui.TextUnformatted(b.Type.Length > 0 ? b.Type : "Character");
         if (b.Children.Count > 0) { ImGui.SameLine(); ImGui.TextDisabled($"- {b.Children.Count} sub-item(s)"); }
         DrawTransferButtons(n);
+        if (b.Type == "Variant" && b.Props.All(p => !p.Key.Equals("specie", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (ImGui.Button("Add Specie"))
+            {
+                var sp = new Prop { Key = "specie", Value = "", Quoted = true };
+                b.Props.Add(sp);
+                StartEditing(sp);
+                f.Dirty = true;
+            }
+        }
 
         const ImGuiTableFlags tf = ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchProp;
         if (ImGui.BeginTable("##fields", 3, tf))
@@ -205,14 +215,26 @@ public partial class Game1
         if (IsKeyField(b, p)) { DrawEditControl(p, () => DrawKeyMenu(b, f, p)); return; }
         DrawEditControl(p, null);
     }
+    private Prop? _focusProp;   // field whose input should grab keyboard focus on its first frame
 
-    /// <summary>Plain text: label when read-only, input when the field is being edited.</summary>
+    /// <summary>Switches a field to its editor and gives it the keyboard focus so typing works at once.</summary>
+    private void StartEditing(Prop p)
+    {
+        _editingProps.Add(p);
+        _focusProp = p;
+    }
+
+    /// <summary>Plain text: label when read-only; input when edited (Enter validates, like the V button).</summary>
     private void DrawTextValue(ParsedFile f, Prop p)
     {
         if (_editingProps.Contains(p))
         {
+            if (_focusProp == p) { ImGui.SetKeyboardFocusHere(); _focusProp = null; }
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.InputText("##v", ref p.Value, 1024)) f.Dirty = true;
+            var before = p.Value;
+            bool enter = ImGui.InputText("##text", ref p.Value, 1024, ImGuiInputTextFlags.EnterReturnsTrue);
+            if (p.Value != before) f.Dirty = true;
+            if (enter) _editingProps.Remove(p);
         }
         else
         {
@@ -226,12 +248,12 @@ public partial class Game1
     {
         if (_editingProps.Contains(p))
         {
-            if (IconButton("##v", true)) _editingProps.Remove(p);
+            if (IconButton("##done", true)) _editingProps.Remove(p);
             return;
         }
         if (IconButton("##e", false))
         {
-            if (menu == null) _editingProps.Add(p); else ImGui.OpenPopup("##menu");
+            if (menu == null) StartEditing(p); else ImGui.OpenPopup("##menu");
         }
         if (menu != null && ImGui.BeginPopup("##menu")) { menu(); ImGui.EndPopup(); }
     }
@@ -242,7 +264,7 @@ public partial class Game1
         ImGui.TableNextColumn();
         if (IconButton("##t", _editingProps.Contains(p)))
         {
-            if (!_editingProps.Remove(p)) _editingProps.Add(p);
+            if (!_editingProps.Remove(p)) StartEditing(p);
         }
     }
 
@@ -254,7 +276,7 @@ public partial class Game1
         if (!translated)
         {
             if (ImGui.MenuItem("Add Translation")) OpenCreateTranslation(b, f, p, convertName: true);
-            if (ImGui.MenuItem("Edit")) _editingProps.Add(p);
+            if (ImGui.MenuItem("Edit")) StartEditing(p);
             return;
         }
 
@@ -263,7 +285,7 @@ public partial class Game1
         if (ImGui.MenuItem("Add Language", null, false, res != null)) OpenAddLanguage(res!.Value.file, res.Value.entry);
         if (ImGui.MenuItem("Edit Translation", null, false, res != null))
             _editingTr.Add(p);
-        if (ImGui.MenuItem("Edit Code")) _editingProps.Add(p);
+        if (ImGui.MenuItem("Edit Code")) StartEditing(p);
         if (ImGui.MenuItem("Remove Translation"))
         {
             // Back to plain text, starting from the English translation when there is one.
@@ -285,7 +307,7 @@ public partial class Game1
         }
         if (ImGui.MenuItem("Add Language")) OpenAddLanguage(res.Value.file, res.Value.entry);
         if (ImGui.MenuItem("Edit Translation")) _editingTr.Add(p);
-        if (ImGui.MenuItem("Edit Code")) _editingProps.Add(p);
+        if (ImGui.MenuItem("Edit Code")) StartEditing(p);
     }
 
     private void DrawIconMenu(Block b, ParsedFile f, Prop icon)
@@ -418,7 +440,7 @@ public partial class Game1
     private void DrawSkinCombo(Block b, ParsedFile f, Prop p)
     {
         var model = b.Get("model") ?? "";
-        var prefix = $"{ModelsRoot}/{model}/";
+        var prefix = $"{ModelRootOf(model)}/{model}/";
         var skins = _index!.Files.Values
             .Where(e => e.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
                         e.Path.EndsWith(".skin", StringComparison.OrdinalIgnoreCase) &&
@@ -487,6 +509,7 @@ public partial class Game1
             v.Props.Add(new Prop { Key = "model", Value = first?.Get("model") ?? "" });
             v.Props.Add(new Prop { Key = "skin", Value = first?.Get("skin") ?? "model_default" });
             v.Props.Add(new Prop { Key = "descriptionKey", Value = first?.Get("descriptionKey") ?? "" });
+            v.Props.Add(new Prop { Key = "specie", Value = first?.Get("specie") ?? "", Quoted = true });
             b.Children.Add(v);
             var node = Node.BuildBlock(v, f);
             n.Children.Add(node);
@@ -532,12 +555,28 @@ public partial class Game1
             ImGui.TextUnformatted(p.Key.Substring(5));
             // "\n" is stored as a literal escape in the file; edit it as a real line break.
             var text = p.Value.Replace("\\n", "\n");
-            float h = ImGui.GetTextLineHeight() * Math.Clamp(text.Count(c => c == '\n') + 2, 2, 12) + 8;
-            var flags = editing ? ImGuiInputTextFlags.None : ImGuiInputTextFlags.ReadOnly;
-            if (ImGui.InputTextMultiline("##t", ref text, 8192, new Vec2(-1, h), flags) && editing)
+            if (editing)
             {
-                p.Value = EscapeStr(text);
-                sf.Dirty = true;
+                float h = ImGui.GetTextLineHeight() * Math.Clamp(text.Count(c => c == '\n') + 2, 2, 12) + 8;
+                if (ImGui.InputTextMultiline("##t", ref text, 8192, new Vec2(-1, h)))
+                {
+                    p.Value = EscapeStr(text);
+                    sf.Dirty = true;
+                }
+            }
+            else
+            {
+                // InputTextMultiline cannot wrap, so the read-only view is drawn with TextWrapped at the field width.
+                var pad = ImGui.GetStyle().FramePadding;
+                float wrapWidth = ImGui.GetContentRegionAvail().X - 2 * pad.X - 2;
+                float textH = ImGui.CalcTextSize(text, false, wrapWidth).Y;
+                float h = Math.Min(textH, ImGui.GetTextLineHeight() * 12) + 2 * pad.Y + 2;
+                ImGui.PushStyleColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.FrameBg));
+                ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, pad);
+                if (ImGui.BeginChild("##t", new Vec2(-1, h), true)) ImGui.TextWrapped(text);
+                ImGui.EndChild();
+                ImGui.PopStyleVar();
+                ImGui.PopStyleColor();
             }
             ImGui.PopID();
         }
@@ -582,6 +621,7 @@ public partial class Game1
     {
         _mBlock = b; _mFile = f; _mProp = p; _mError = "";
         _mFoldersStale = true;
+        _modelFolders = null;
         _openModalName = ModalModel;
     }
 
@@ -766,16 +806,10 @@ public partial class Game1
         bool open = true;
         if (!ImGui.BeginPopupModal(ModalModel, ref open)) return;
 
-        ImGui.TextWrapped($"Folders under {ModelsRoot}/. Choosing one resets the icon to its default path.");
+        ImGui.TextWrapped("Model folders under models/players*/ (including loose files in SWGL/). Choosing one resets the icon to its default path.");
         if (_mFoldersStale)
         {
-            _mFolders = _index!.Files.Keys
-                .Where(k => k.StartsWith(ModelsRoot + "/", StringComparison.OrdinalIgnoreCase) &&
-                            k.EndsWith(".glm", StringComparison.OrdinalIgnoreCase))
-                .Select(k => k.Split('/')[2])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            _mFolders = ModelFolders().Keys.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
             _mFoldersStale = false;
         }
 
@@ -790,7 +824,9 @@ public partial class Game1
             foreach (var folder in _mFolders)
             {
                 if (_mFolderFilter.Length > 0 && !folder.Contains(_mFolderFilter, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!ImGui.Selectable(folder, folder.Equals(_mProp?.Value, StringComparison.OrdinalIgnoreCase))) continue;
+                var info = ModelFolders()[folder];
+                var label = folder + (info.root.Equals(ModelsRoot, StringComparison.OrdinalIgnoreCase) ? "" : $"   [{info.root}]") + (info.loose ? "   [loose]" : "");
+                if (!ImGui.Selectable(label + "##" + folder, folder.Equals(_mProp?.Value, StringComparison.OrdinalIgnoreCase))) continue;
                 ApplyModelFolder(folder);
                 ImGui.CloseCurrentPopup();
                 break;
@@ -815,7 +851,7 @@ public partial class Game1
         var skin = b.Props.FirstOrDefault(x => x.Key.Equals("skin", StringComparison.OrdinalIgnoreCase));
         if (skin != null)
         {
-            var prefix = $"{ModelsRoot}/{folder}/";
+            var prefix = $"{ModelRootOf(folder)}/{folder}/";
             var skins = _index!.Files.Keys
                 .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.EndsWith(".skin", StringComparison.OrdinalIgnoreCase))
                 .Select(k => Path.GetFileNameWithoutExtension(k)).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
@@ -968,6 +1004,41 @@ public partial class Game1
         _status = $"Renamed to {pf.Name}.";
     }
 
+    // ---------------------------------------------------------------- model folders
+
+    private Dictionary<string, (string root, bool loose)>? _modelFolders;
+
+    /// <summary>
+    /// Model folders found in the index under models/players*/ (any glm inside), including loose files in SWGL/.
+    /// "models/players" wins over other roots when a folder name exists in several.
+    /// </summary>
+    private Dictionary<string, (string root, bool loose)> ModelFolders()
+    {
+        if (_modelFolders != null) return _modelFolders;
+        var map = new Dictionary<string, (string root, bool loose)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _index!.Files.Values)
+        {
+            if (!e.Path.EndsWith(".glm", StringComparison.OrdinalIgnoreCase)) continue;
+            var parts = e.Path.Split('/');
+            if (parts.Length < 4 || !parts[0].Equals("models", StringComparison.OrdinalIgnoreCase) ||
+                !parts[1].StartsWith("players", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var root = parts[0] + "/" + parts[1];
+            if (map.TryGetValue(parts[2], out var cur))
+            {
+                bool keepCurrent = cur.root.Equals(ModelsRoot, StringComparison.OrdinalIgnoreCase) ||
+                                   !root.Equals(ModelsRoot, StringComparison.OrdinalIgnoreCase);
+                map[parts[2]] = keepCurrent ? (cur.root, cur.loose || e.IsLoose) : (root, e.IsLoose);
+            }
+            else map[parts[2]] = (root, e.IsLoose);
+        }
+        return _modelFolders = map;
+    }
+
+    /// <summary>Root (models/players, models/players2...) holding the folder of a model.</summary>
+    private string ModelRootOf(string model) =>
+        ModelFolders().TryGetValue(model, out var v) ? v.root : ModelsRoot;
+
     // ---------------------------------------------------------------- copy to / move to
 
     private Node? _tNode;           // character or variant being transferred
@@ -1093,7 +1164,7 @@ public partial class Game1
             ? target.Block!.Children.Select(c => c.Get("code") ?? "").ToList()
             : _roots.Where(r => r.Title == "Characters").SelectMany(r => r.Children).SelectMany(fn => fn.Children)
                     .Select(c => c.Block!.Get("code") ?? "").ToList();
-        if (_tMove) taken.RemoveAll(c => c.Equals(src.Block.Get("code") ?? "", StringComparison.OrdinalIgnoreCase));
+        if (_tMove) taken.RemoveAll(c => c.Equals(src.Block!.Get("code") ?? "", StringComparison.OrdinalIgnoreCase));
         if (codeProp != null) codeProp.Value = UniqueCode(codeProp.Value, taken);
 
         var targetFile = target.File!;
@@ -1119,6 +1190,51 @@ public partial class Game1
         _tNode = null;
     }
 
+    // ---------------------------------------------------------------- drag and drop transfer
+
+    private const string TransferPayload = "SWGL_TRANSFER";
+    private Node? _dragNode;
+    private (Node src, Node target, bool copy)? _pendingDrop;
+
+    /// <summary>Drag a character onto a .cha file, or a variant onto a character. Holding Ctrl copies instead of moving.</summary>
+    private unsafe void DrawTransferDragDrop(Node n)
+    {
+        if (IsTransferable(n) && ImGui.BeginDragDropSource())
+        {
+            _dragNode = n;
+            ImGui.SetDragDropPayload(TransferPayload, IntPtr.Zero, 0);
+            ImGui.TextUnformatted($"{n.Label}  (Ctrl = copy)");
+            ImGui.EndDragDropSource();
+        }
+        if (ImGui.BeginDragDropTarget())
+        {
+            // No payload of our type during this hover: IsDelivery would dereference a null pointer in native ImGui.
+            var payload = ImGui.AcceptDragDropPayload(TransferPayload);
+            if (_dragNode != null && payload.NativePtr != null && payload.IsDelivery()
+                && CanDrop(_dragNode, n, ImGui.GetIO().KeyCtrl))
+                _pendingDrop = (_dragNode, n, ImGui.GetIO().KeyCtrl);
+            ImGui.EndDragDropTarget();
+        }
+    }
+
+    private bool CanDrop(Node src, Node target, bool copy)
+    {
+        if (!IsCharacterFile(target)) return false;
+        bool variant = src.Block!.Type == "Variant";
+        if (variant ? target.Kind != NodeKind.Block || target.Block!.Type == "Variant" : target.Kind != NodeKind.File)
+            return false;
+        return copy || target != FindParent(src); // moving into its own parent is a no-op
+    }
+
+    /// <summary>Runs a drop collected while drawing the tree, once the tree is no longer being enumerated.</summary>
+    private void ApplyPendingDrop()
+    {
+        if (_pendingDrop is not { } d) return;
+        _pendingDrop = null;
+        _tMove = !d.copy;
+        Transfer(d.src, FindParent(d.src), d.target, d.src.Block!.Type == "Variant");
+    }
+
     // ---------------------------------------------------------------- index refresh
 
     private void RefreshIndex()
@@ -1128,7 +1244,11 @@ public partial class Game1
         var dir = _gameDir;
         Task.Run(() =>
         {
-            try { _pendingIndex = Pk3Index.Build(dir); }
+            try
+            {
+                var idx = Pk3Index.Build(dir);
+                if (dir == _gameDir) _pendingIndex = idx; // ignore a result for a folder that is no longer the current one
+            }
             catch (Exception ex) { _status = "Refresh failed: " + ex.Message; }
             finally { _refreshing = false; }
         });
@@ -1144,6 +1264,7 @@ public partial class Game1
         _strByName = null;
         foreach (var k in _strCache.Where(kv => !kv.Value.Dirty).Select(kv => kv.Key).ToList()) _strCache.Remove(k);
         _factionTitles = null;
+        _modelFolders = null;
         _images.Invalidate();
         _mFoldersStale = true;
         _status = $"Index refreshed: {idx.Files.Count} files.";
@@ -1155,7 +1276,7 @@ public partial class Game1
     private Pk3Entry? ResolveGlm(string model, string skin)
     {
         var files = _index!.Files;
-        var prefix = $"{ModelsRoot}/{model}/";
+        var prefix = $"{ModelRootOf(model)}/{model}/";
         if (files.TryGetValue(prefix + skin + ".glm", out var exact)) return exact;
         return files.Values
             .Where(e => e.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
@@ -1238,11 +1359,11 @@ public partial class Game1
         if (glm == null)
         {
             _viewer.Clear();
-            _modelError = model.Length == 0 ? "No model set." : $"No GLM found in {ModelsRoot}/{model}/";
+            _modelError = model.Length == 0 ? "No model set." : $"No GLM found in {ModelRootOf(model)}/{model}/";
             return false;
         }
 
-        _index!.Files.TryGetValue($"{ModelsRoot}/{model}/{skin}.skin", out var skinEntry);
+        _index!.Files.TryGetValue($"{ModelRootOf(model)}/{model}/{skin}.skin", out var skinEntry);
         var key = $"{glm.Path}|{glm.Pk3Name}|{glm.Size}|{skinEntry?.Path}|{skinEntry?.Pk3Name}";
         if (key == _modelFailedKey) return false;
 
@@ -1272,6 +1393,9 @@ public partial class Game1
         return true;
     }
 
+    /// <summary>Side of the icon overlaid top right in the center pane (characters and variants).</summary>
+    private const float PreviewIconSize = 96;
+
     /// <summary>Center pane for a variant: orbitable model with the icon as a small square top right.</summary>
     private void DrawModelPreview(Block b)
     {
@@ -1292,12 +1416,11 @@ public partial class Game1
 
         var dl = ImGui.GetWindowDrawList();
         uint white = ImGui.GetColorU32(new Vec4(1, 1, 1, 0.9f));
-        const float iconSize = 72;
         var icon = IconProp(b) is { } ip ? _images.Get(ip.Value) : null;
         if (icon != null)
         {
-            var q0 = new Vec2(p0.X + w - iconSize - 8, p0.Y + 8);
-            var q1 = q0 + new Vec2(iconSize, iconSize);
+            var q0 = new Vec2(p0.X + w - PreviewIconSize - 8, p0.Y + 8);
+            var q1 = q0 + new Vec2(PreviewIconSize, PreviewIconSize);
             dl.AddImage(icon.Id, q0, q1);
             dl.AddRect(q0, q1, white);
         }
@@ -1312,6 +1435,7 @@ public partial class Game1
         if (outPath == null || _debugDone || _indexing || _index == null) return;
         _debugDone = true;
         var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"gameDir={_gameDir} loose={_index.LooseCount} errors=[{string.Join(" | ", _index.Errors)}] hasElween2={_index.Files.Keys.Any(k => k.Contains("Elween2", StringComparison.OrdinalIgnoreCase))}");
         var folders = _index.Files.Keys.Where(k => k.StartsWith("models/players/", StringComparison.OrdinalIgnoreCase) && k.EndsWith(".glm", StringComparison.OrdinalIgnoreCase))
             .Select(k => k.Split('/')[2]).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
         foreach (var folder in folders)
