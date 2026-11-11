@@ -425,9 +425,10 @@ public partial class Game1 : Game
         ImGui.TextDisabled($"Source: {f.Entry.Pk3Folder}/{f.Entry.Pk3Name}");
         if (f.Error != null) ImGui.TextColored(new Vec4(1f, 0.4f, 0.4f, 1f), "Read error: " + f.Error);
 
-        if (!f.Dirty) ImGui.BeginDisabled();
+        bool clean = !f.Dirty;   // captured once: RevertFile clears Dirty before EndDisabled
+        if (clean) ImGui.BeginDisabled();
         if (ImGui.Button("Discard file changes")) RevertFile(f);
-        if (!f.Dirty) ImGui.EndDisabled();
+        if (clean) ImGui.EndDisabled();
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip("Reverts this file to its last saved state. Also discards the Config changes of this file's variants.");
         ImGui.Separator();

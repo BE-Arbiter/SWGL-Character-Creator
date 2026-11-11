@@ -111,9 +111,10 @@ public partial class Game1
         ImGui.TextDisabled(_index!.Files.TryGetValue(path, out var entry) && entry.Size > 0
             ? $"Source: {entry.Pk3Folder}/{entry.Pk3Name}"
             : "(new, not saved)");
-        if (!defs.IsDirty(b)) ImGui.BeginDisabled();
+        bool cfgClean = !defs.IsDirty(b);   // captured once: ResetBinding clears it before EndDisabled
+        if (cfgClean) ImGui.BeginDisabled();
         if (ImGui.Button("Discard config changes")) defs.ResetBinding(b);
-        if (!defs.IsDirty(b)) ImGui.EndDisabled();
+        if (cfgClean) ImGui.EndDisabled();
 
         var def = defs.Load(b);
         if (def == null)
