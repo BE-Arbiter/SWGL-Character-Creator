@@ -27,6 +27,9 @@ jobs:
           else { $v = "0.0.0-latest+$($env:GITHUB_SHA.Substring(0,7))" }
           "version=$v" >> $env:GITHUB_OUTPUT
 
+      - name: Test
+        run: dotnet test tests/SWGLCharacterCreator.Tests -c Release
+
       - name: Publish (self-contained single file)
         run: >
           dotnet publish SWGLCharacterCreator.csproj -c Release -r win-x64

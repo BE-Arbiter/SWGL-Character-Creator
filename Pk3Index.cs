@@ -2,7 +2,7 @@ using System.IO.Compression;
 
 namespace SWGLCharacterCreator;
 
-public sealed record Pk3Entry(string Path, string Pk3Name, string Pk3Folder, long Size, string Pk3FullPath, string EntryName, bool IsLoose = false);
+public sealed record Pk3Entry(string Path, string Pk3Name, string Pk3Folder, long Size, string Pk3FullPath, string EntryName, bool IsLoose = false, byte[]? Memory = null);
 
 /// <summary>
 /// Virtual file system index over base/*.pk3 then SWGL/*.pk3 (alphabetical order).
@@ -100,6 +100,26 @@ public sealed class Pk3Index
         return entry;
     }
 
+    /// <summary>Registers (or replaces) an unsaved in-memory file as the winning version of <paramref name="path"/>.</summary>
+    public Pk3Entry AddMemory(string path, byte[] data)
+    {
+        var key = path.Replace('\\', '/').TrimStart('/');
+        if (_files.ContainsKey(key)) Overridden++;
+        var entry = new Pk3Entry(key, "(unsaved)", "SWGL", data.Length, "", key, Memory: data);
+        _files[key] = entry;
+        return entry;
+    }
+
+    /// <summary>Registers (or replaces) an entry stored in a pk3 on disk as the winning version of <paramref name="path"/>.</summary>
+    public Pk3Entry AddPk3Entry(string path, string pk3FullPath, long size)
+    {
+        var key = path.Replace('\\', '/').TrimStart('/');
+        if (_files.ContainsKey(key)) Overridden++;
+        var entry = new Pk3Entry(key, System.IO.Path.GetFileName(pk3FullPath), "SWGL", size, pk3FullPath, key);
+        _files[key] = entry;
+        return entry;
+    }
+
     public void Remove(string path)
     {
         var key = path.Replace('\\', '/').TrimStart('/');
@@ -122,6 +142,7 @@ public static class Pk3Reader
 {
     public static byte[] ReadBytes(Pk3Entry entry)
     {
+        if (entry.Memory != null) return entry.Memory;
         if (entry.IsLoose) return File.ReadAllBytes(entry.Pk3FullPath);
         using var zip = ZipFile.OpenRead(entry.Pk3FullPath);
         var e = zip.GetEntry(entry.EntryName) ?? throw new FileNotFoundException(entry.EntryName);
@@ -134,6 +155,7 @@ public static class Pk3Reader
     /// <summary>Reads an entry as Latin-1 so that every byte round-trips unchanged.</summary>
     public static string ReadText(Pk3Entry entry)
     {
+        if (entry.Memory != null) return System.Text.Encoding.Latin1.GetString(entry.Memory);
         if (entry.IsLoose) return File.ReadAllText(entry.Pk3FullPath, System.Text.Encoding.Latin1);
         using var zip = ZipFile.OpenRead(entry.Pk3FullPath);
         var e = zip.GetEntry(entry.EntryName) ?? throw new FileNotFoundException(entry.EntryName);
