@@ -26,6 +26,7 @@ public partial class Game1 : Game
     private (int done, int total, string current) _progress;
     private string _status = NoFolderMessage;
     private DefStore? _defs;   // variant <-> _def.cfg bindings, created with the index
+    private GameDataCatalog? _catalog;   // weapons / sabers / NPC types from the game data, created with the index
     private PendingChanges _pending = new();   // edits staged in memory, reset whenever the folder is re-indexed
     private int _loadGeneration;   // bumped by every SetGameDir so that a stale indexing run is ignored
 
@@ -101,6 +102,7 @@ public partial class Game1 : Game
         _settings.Save();
         _index = null;
         _defs = null;
+        _catalog = null;
         _roots = new();
         _selected = null;
         _expanded.Clear();
@@ -141,6 +143,7 @@ public partial class Game1 : Game
                 var defs = new DefStore(index);
                 foreach (var cf in chaNode.Children.Where(c => c.File!.Error == null)) defs.Bind(cf.File!.Config);
                 _defs = defs;
+                _catalog = GameDataCatalog.Build(index);
                 _index = index;
                 _roots = new List<Node> { facNode, chaNode };
                 _status = index.Pk3Count == 0
