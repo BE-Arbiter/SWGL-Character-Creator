@@ -190,12 +190,15 @@ public partial class Game1 : Game
                 if (ImGui.MenuItem("Select SWGL folder...")) _openBrowser = true;
                 if (ImGui.MenuItem("Re-index", null, false, _gameDir != null && !_indexing)) SetGameDir(_gameDir!);
                 ImGui.Separator();
+                if (ImGui.MenuItem("Save changes", "Ctrl+S", false, HasPendingChanges() && !_indexing)) BeginSave();
+                ImGui.Separator();
                 if (ImGui.MenuItem("Quit")) Exit();
                 ImGui.EndMenu();
             }
             ImGui.EndMainMenuBar();
         }
 
+        HandleSaveShortcut();
         if (_openBrowser)
         {
             _openBrowser = false;
@@ -210,6 +213,7 @@ public partial class Game1 : Game
         }
         DrawImagePicker();
         DrawModals();
+        DrawSaveModals();
 
         var vp = ImGui.GetMainViewport();
         float menuH = ImGui.GetFrameHeight();
