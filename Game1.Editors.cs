@@ -956,6 +956,7 @@ public partial class Game1
             IsNew = true,
             Dirty = true,
         };
+        if (IsChaPath(path)) _defs?.Bind(pf.Config);
         var node = Node.BuildFile(pf);
         InsertSorted(category, node);
         _expanded.Add(category);
@@ -1145,6 +1146,7 @@ public partial class Game1
         if (_tMove) taken.RemoveAll(c => c.Equals(src.Block!.Get("code") ?? "", StringComparison.OrdinalIgnoreCase));
         if (codeProp != null) codeProp.Value = UniqueCode(codeProp.Value, taken);
 
+        _defs?.CopyDefs(src.Block!, clone);
         var targetFile = target.File!;
         if (variant) target.Block!.Children.Add(clone); else targetFile.Config.Blocks.Add(clone);
         var node = Node.BuildBlock(clone, targetFile);

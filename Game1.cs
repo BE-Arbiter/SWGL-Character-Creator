@@ -25,6 +25,7 @@ public partial class Game1 : Game
     private volatile bool _indexing;
     private (int done, int total, string current) _progress;
     private string _status = NoFolderMessage;
+    private DefStore? _defs;   // variant <-> _def.cfg bindings, created with the index
     private PendingChanges _pending = new();   // edits staged in memory, reset whenever the folder is re-indexed
     private int _loadGeneration;   // bumped by every SetGameDir so that a stale indexing run is ignored
 
@@ -99,6 +100,7 @@ public partial class Game1 : Game
         _settings.GameDataPath = dir;
         _settings.Save();
         _index = null;
+        _defs = null;
         _roots = new();
         _selected = null;
         _expanded.Clear();
@@ -136,6 +138,9 @@ public partial class Game1 : Game
 
                 if (generation != _loadGeneration) return; // another folder was selected meanwhile
 
+                var defs = new DefStore(index);
+                foreach (var cf in chaNode.Children.Where(c => c.File!.Error == null)) defs.Bind(cf.File!.Config);
+                _defs = defs;
                 _index = index;
                 _roots = new List<Node> { facNode, chaNode };
                 _status = index.Pk3Count == 0
@@ -155,6 +160,8 @@ public partial class Game1 : Game
             }
         });
     }
+
+    private static bool IsChaPath(string path) => path.EndsWith(".cha", StringComparison.OrdinalIgnoreCase);
 
     private static ParsedFile LoadFile(Pk3Entry entry)
     {
@@ -486,9 +493,11 @@ public partial class Game1 : Game
     private void RevertFile(ParsedFile f)
     {
         var fresh = f.IsNew ? new ParsedFile { Entry = f.Entry } : LoadFile(f.Entry); // a never-saved file reverts to empty
+        if (IsChaPath(f.Entry.Path)) _defs?.Unbind(f.Config);
         f.Config = fresh.Config;
         f.Error = fresh.Error;
         f.Dirty = false;
+        if (IsChaPath(f.Entry.Path) && f.Error == null) _defs?.Bind(f.Config);
 
         // Rebuild the file's subtree against the reloaded blocks, keeping the file node itself.
         var node = _roots.SelectMany(r => r.Children).First(c => c.File == f);

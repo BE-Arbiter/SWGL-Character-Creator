@@ -17,7 +17,7 @@ public partial class Game1
         _roots.SelectMany(r => r.Children).Where(c => c.File != null).Select(c => c.File!);
 
     private bool HasPendingChanges() =>
-        _pending.Any || AllParsedFiles().Any(f => f.Dirty) || _strCache.Values.Any(s => s.Dirty);
+        _pending.Any || AllParsedFiles().Any(f => f.Dirty) || _strCache.Values.Any(s => s.Dirty) || (_defs?.AnyDirty ?? false);
 
     /// <summary>All unsaved edits as path -> bytes. The single place where the change sources are merged (later sources win).</summary>
     private Dictionary<string, byte[]> CollectChanges()
@@ -28,8 +28,14 @@ public partial class Game1
             changes[f.Entry.Path] = System.Text.Encoding.Latin1.GetBytes(f.Config.Serialize());
         foreach (var s in _strCache.Values.Where(s => s.Dirty))
             changes[s.Entry.Path] = System.Text.Encoding.Latin1.GetBytes(s.Serialize());
+        if (_defs != null)
+            foreach (var (p, b) in _defs.CollectChanges(ChaConfigs())) changes[p] = b;
         return changes;
     }
+
+    private IEnumerable<ConfigFile> ChaConfigs() =>
+        _roots.Where(r => r.Title == "Characters").SelectMany(r => r.Children)
+              .Where(c => c.File != null && c.File.Error == null).Select(c => c.File!.Config);
 
     private void BeginSave()
     {
@@ -63,6 +69,7 @@ public partial class Game1
             if (changes.ContainsKey(s.Entry.Path)) { s.Entry = _index!.Files[s.Entry.Path]; s.Dirty = false; }
             else if (!s.Dirty) _strCache.Remove(k);
         }
+        _defs?.AfterSave(ChaConfigs());
         _pending.Clear();
         _strByName = null;
         _factionTitles = null;
