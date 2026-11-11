@@ -974,6 +974,7 @@ public partial class Game1
     private void RenameFile(Node fileNode, Node category, string typed)
     {
         var pf = fileNode.File!;
+        if (pf.Error != null) { _status = $"Cannot rename {pf.Name}: it could not be read ({pf.Error})."; return; }
         var newPath = ValidatedPath(category, typed, pf);
         var old = pf.Entry;
         if (newPath.Equals(old.Path, StringComparison.OrdinalIgnoreCase) && newPath == old.Path) return;
@@ -1226,12 +1227,14 @@ public partial class Game1
         if (_refreshing || _gameDir == null) return;
         _refreshing = true;
         var dir = _gameDir;
+        int loadGen = _loadGeneration, saveGen = _saveGeneration;
         Task.Run(() =>
         {
             try
             {
                 var idx = Pk3Index.Build(dir);
-                if (dir == _gameDir) _pendingIndex = idx; // ignore a result for a folder that is no longer the current one
+                // Ignore a result for another folder, a re-index, or one built before the last save (it lacks the saved pk3).
+                if (dir == _gameDir && loadGen == _loadGeneration && saveGen == _saveGeneration) _pendingIndex = idx;
             }
             catch (Exception ex) { _status = "Refresh failed: " + ex.Message; }
             finally { _refreshing = false; }
@@ -1244,7 +1247,9 @@ public partial class Game1
         var idx = _pendingIndex;
         if (idx == null) return;
         _pendingIndex = null;
+        _pending.ReplayInto(idx);   // unsaved staged files and deletions are not on disk yet
         _index = idx;
+        _defs?.Rebase(idx);
         _strByName = null;
         foreach (var k in _strCache.Where(kv => !kv.Value.Dirty).Select(kv => kv.Key).ToList()) _strCache.Remove(k);
         _factionTitles = null;

@@ -32,6 +32,18 @@ public sealed class ChangesPk3Tests : IDisposable
         Assert.Equal("Z___SWGL_Characters_changes_261111.pk3", ChangesPk3.FileName(D));
 
     [Fact]
+    public void FileName_IgnoresCurrentCulture()
+    {
+        var old = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ar-SA");
+            Assert.Equal("Z___SWGL_Characters_changes_261111.pk3", ChangesPk3.FileName(D));
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = old; }
+    }
+
+    [Fact]
     public void Write_CreatesPk3WithEntriesAndEmptyDeletes()
     {
         var r = ChangesPk3.Write(dir, D, new Dictionary<string, byte[]>

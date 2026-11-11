@@ -39,4 +39,13 @@ public class EditStagingTests
         Assert.Single(p.Items);
         Assert.Equal(B(3), p.Items["a/x.cha"]);
     }
+    [Fact] public void CaseOnlyRenameThenRename_StagesDeleteOfOriginal() {
+        var p = new PendingChanges(); var ix = new Pk3Index();
+        var x = ix.AddPk3Entry("a/X.cha", "p.pk3", 1);
+        var lower = EditStaging.Rename(p, ix, x, "a/x.cha", B(3));
+        EditStaging.Rename(p, ix, lower, "a/Y.cha", B(4));
+        Assert.Empty(p.Items["a/X.cha"]);
+        Assert.Equal(B(4), p.Items["a/Y.cha"]);
+        Assert.Equal(2, p.Items.Count);
+    }
 }

@@ -10,6 +10,11 @@ public partial class Game1
 
     private Dictionary<string, byte[]>? _saveChanges;   // collected changes waiting for the loose-files answer
     private List<string> _saveMasking = new();
+    private const string ModalUnsaved = "Unsaved changes";
+    private Action? _afterUnsaved;   // the quit / re-index / folder change waiting for the unsaved-changes answer
+    private Action? _afterSave;      // runs once a save started from the unsaved-changes dialog has fully succeeded
+    private bool _openUnsaved, _allowExit;
+    private volatile int _saveGeneration;   // bumped by every successful save so that an older index refresh is ignored
     private string _savedPath = "";
     private bool _openLooseMask, _openSaved;
 
@@ -37,8 +42,10 @@ public partial class Game1
         _roots.Where(r => r.Title == "Characters").SelectMany(r => r.Children)
               .Where(c => c.File != null && c.File.Error == null).Select(c => c.File!.Config);
 
-    private void BeginSave()
+    /// <summary>Starts the save flow. <paramref name="then"/> runs only after a successful save that leaves nothing pending.</summary>
+    private void BeginSave(Action? then = null)
     {
+        _afterSave = null;
         if (_gameDir == null || _index == null || _indexing) return;
         _defs?.Prune(ChaConfigs());
         var changes = CollectChanges();
@@ -46,6 +53,7 @@ public partial class Game1
         List<string> masking;
         try { masking = SavePlan.FindMaskingLoose(_gameDir, changes.Keys); }
         catch (Exception ex) { _status = "Save failed: " + ex.Message; return; }
+        _afterSave = then;
         if (masking.Count == 0) { ExecuteSave(changes, false); return; }
         _saveChanges = changes;
         _saveMasking = masking;
@@ -56,7 +64,7 @@ public partial class Game1
     {
         SaveOutcome outcome;
         try { outcome = SavePlan.Commit(_gameDir!, DateTime.Now, changes, deleteLoose, _index!); }
-        catch (Exception ex) { _status = "Save failed: " + ex.Message; return; }
+        catch (Exception ex) { _status = "Save failed: " + ex.Message; _afterSave = null; return; }
 
         foreach (var f in AllParsedFiles().Where(f => changes.ContainsKey(f.Entry.Path)))
         {
@@ -72,12 +80,25 @@ public partial class Game1
         }
         _defs?.AfterSave(ChaConfigs());
         _pending.Clear();
+        _saveGeneration++;
+        _pendingIndex = null;
         _strByName = null;
         _factionTitles = null;
 
         _status = $"Saved {changes.Count} file(s) to {Path.GetFileName(outcome.Result.Pk3Path)}." +
                   (outcome.DeleteErrors.Count > 0 ? " Could not delete loose file(s): " + string.Join("; ", outcome.DeleteErrors) : "");
         if (outcome.Result.Created) { _savedPath = outcome.Result.Pk3Path; _openSaved = true; }
+
+        var then = _afterSave;
+        _afterSave = null;
+        if (then != null && !HasPendingChanges()) then();
+    }
+
+    /// <summary>Runs <paramref name="action"/> now, or after the user answers the unsaved-changes dialog.</summary>
+    private void RunOrConfirm(Action action)
+    {
+        if (HasPendingChanges()) { _afterUnsaved = action; _openUnsaved = true; }
+        else action();
     }
 
     private void HandleSaveShortcut()
@@ -91,9 +112,34 @@ public partial class Game1
     {
         if (_openLooseMask) { _openLooseMask = false; ImGui.OpenPopup(ModalLooseMask); }
         if (_openSaved) { _openSaved = false; ImGui.OpenPopup(ModalSaved); }
+        if (_openUnsaved) { _openUnsaved = false; ImGui.OpenPopup(ModalUnsaved); }
+
+        CenterNextWindow(460, 150);
+        bool open = true;
+        if (ImGui.BeginPopupModal(ModalUnsaved, ref open))
+        {
+            ImGui.TextWrapped("You have unsaved changes. Save them before continuing?");
+            if (ImGui.Button("Save"))
+            {
+                var a = _afterUnsaved; _afterUnsaved = null;
+                ImGui.CloseCurrentPopup();
+                BeginSave(a);
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Discard"))
+            {
+                var a = _afterUnsaved; _afterUnsaved = null;
+                ImGui.CloseCurrentPopup();
+                a?.Invoke();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel")) { _afterUnsaved = null; ImGui.CloseCurrentPopup(); }
+            ImGui.EndPopup();
+        }
+        else if (!_openUnsaved) _afterUnsaved = null;   // closed with the window's X
 
         CenterNextWindow(560, 300);
-        bool open = true;
+        open = true;
         if (ImGui.BeginPopupModal(ModalLooseMask, ref open))
         {
             if (ImGui.BeginChild("##masklist", new Vec2(0, -ImGui.GetFrameHeightWithSpacing() * 3), true))
@@ -115,6 +161,7 @@ public partial class Game1
             }
             ImGui.EndPopup();
         }
+        else if (_saveChanges != null && !_openLooseMask) { _saveChanges = null; _afterSave = null; }   // dialog dismissed: save cancelled
 
         CenterNextWindow(560, 170);
         open = true;

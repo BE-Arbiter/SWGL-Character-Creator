@@ -24,4 +24,15 @@ public class PendingChangesTests
         Assert.True(p.Remove("A"));
         Assert.False(p.Any);
     }
+
+    [Fact] public void ReplayInto_AddsStagedAndDeletedAsMemoryEntries()
+    {
+        var p = new PendingChanges(); var ix = new Pk3Index();
+        ix.AddPk3Entry("a/old.cha", "p.pk3", 5);
+        p.Stage("a/new.cha", new byte[] { 1, 2 });
+        p.StageDelete("a/old.cha");
+        p.ReplayInto(ix);
+        Assert.Equal(new byte[] { 1, 2 }, ix.Files["a/new.cha"].Memory);
+        Assert.Empty(ix.Files["a/old.cha"].Memory!);
+    }
 }

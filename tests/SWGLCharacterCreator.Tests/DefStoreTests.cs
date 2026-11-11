@@ -208,4 +208,34 @@ public class DefStoreTests
         Assert.False(s.AnyDirty);
         Assert.Empty(s.CollectChanges(new[] { fresh }));
     }
+
+    [Fact] public void ResetBinding_RestoresOriginal()
+    {
+        var (s, f, _, def, _) = Setup();
+        s.SetDef(def, DefFile.Parse("ui_force 9"));
+        Assert.True(s.IsDirty(def));
+        s.ResetBinding(def);
+        Assert.False(s.IsDirty(def));
+        Assert.Empty(s.CollectChanges(new[] { f }));
+        Assert.Equal("ui_force 1", s.Load(def)!.Serialize().Trim());
+    }
+
+    [Fact] public void ResetBinding_NoOriginRemovesBinding()
+    {
+        var (s, f, ch, _, _) = Setup();
+        var v = new Block { Type = "Variant" };
+        s.SetDef(v, DefFile.Parse("ui_force 5"));
+        s.ResetBinding(v);
+        Assert.False(s.IsDirty(v));
+        Assert.Null(s.Load(v));
+    }
+
+    [Fact] public void Rebase_UsesNewIndexForLoads()
+    {
+        var (s, f, _, def, _) = Setup();
+        var ix2 = new Pk3Index();
+        ix2.AddMemory(DefStore.PathFor("AAYLA", "DEFAULT"), Encoding.Latin1.GetBytes("ui_force 7"));
+        s.Rebase(ix2);
+        Assert.Contains("7", s.Load(def)!.Serialize());
+    }
 }

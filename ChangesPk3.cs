@@ -9,7 +9,7 @@ public static class ChangesPk3
 {
     public const string Prefix = "Z___SWGL_Characters_changes_";
 
-    public static string FileName(DateTime date) => Prefix + date.ToString("yyMMdd") + ".pk3";
+    public static string FileName(DateTime date) => Prefix + date.ToString("yyMMdd", System.Globalization.CultureInfo.InvariantCulture) + ".pk3";
 
     /// <summary>
     /// Merges <paramref name="changes"/> (path -> bytes; empty array = zero-length entry) into the day's pk3.

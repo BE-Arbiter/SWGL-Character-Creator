@@ -94,6 +94,22 @@ public partial class Game1 : Game
         _openBrowser = true;
     }
 
+    protected override void OnExiting(object sender, ExitingEventArgs args)
+    {
+        if (!_allowExit && HasPendingChanges())
+        {
+            args.Cancel = true;   // window closed with unsaved edits: ask first
+            RunOrConfirm(QuitNow);
+        }
+        base.OnExiting(sender, args);
+    }
+
+    private void QuitNow()
+    {
+        _allowExit = true;
+        Exit();
+    }
+
     private void SetGameDir(string dir)
     {
         _gameDir = dir;
@@ -198,11 +214,11 @@ public partial class Game1 : Game
             if (ImGui.BeginMenu("File"))
             {
                 if (ImGui.MenuItem("Select SWGL folder...")) _openBrowser = true;
-                if (ImGui.MenuItem("Re-index", null, false, _gameDir != null && !_indexing)) SetGameDir(_gameDir!);
+                if (ImGui.MenuItem("Re-index", null, false, _gameDir != null && !_indexing)) RunOrConfirm(() => SetGameDir(_gameDir!));
                 ImGui.Separator();
                 if (ImGui.MenuItem("Save changes", "Ctrl+S", false, HasPendingChanges() && !_indexing)) BeginSave();
                 ImGui.Separator();
-                if (ImGui.MenuItem("Quit")) Exit();
+                if (ImGui.MenuItem("Quit")) RunOrConfirm(QuitNow);
                 ImGui.EndMenu();
             }
             ImGui.EndMainMenuBar();
@@ -410,8 +426,10 @@ public partial class Game1 : Game
         if (f.Error != null) ImGui.TextColored(new Vec4(1f, 0.4f, 0.4f, 1f), "Read error: " + f.Error);
 
         if (!f.Dirty) ImGui.BeginDisabled();
-        if (ImGui.Button("Discard changes")) RevertFile(f);
+        if (ImGui.Button("Discard file changes")) RevertFile(f);
         if (!f.Dirty) ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Reverts this file to its last saved state. Also discards the Config changes of this file's variants.");
         ImGui.Separator();
     }
 
@@ -515,6 +533,11 @@ public partial class Game1 : Game
     private void RevertFile(ParsedFile f)
     {
         var fresh = f.IsNew ? new ParsedFile { Entry = f.Entry } : LoadFile(f.Entry); // a never-saved file reverts to empty
+        if (f.IsNew)
+        {   // the content captured at creation/rename must not be saved any more
+            _pending.Stage(f.Entry.Path, Array.Empty<byte>());
+            f.Entry = _index!.AddMemory(f.Entry.Path, Array.Empty<byte>());
+        }
         if (IsChaPath(f.Entry.Path)) _defs?.Unbind(f.Config);
         f.Config = fresh.Config;
         f.Error = fresh.Error;
@@ -587,8 +610,8 @@ public partial class Game1 : Game
             else
             {
                 _browseError = "";
-                SetGameDir(resolved);
                 ImGui.CloseCurrentPopup();
+                RunOrConfirm(() => SetGameDir(resolved));
             }
         }
         ImGui.SameLine();

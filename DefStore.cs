@@ -18,11 +18,14 @@ public sealed class DefStore
         public bool Dirty;
     }
 
-    private readonly Pk3Index _index;
+    private Pk3Index _index;
     private readonly Dictionary<Block, Binding> _bindings = new();
     private readonly Dictionary<ConfigFile, List<Block>> _byFile = new();
 
     public DefStore(Pk3Index index) { _index = index; }
+
+    /// <summary>Points the store at a refreshed index (bindings and edits are kept).</summary>
+    public void Rebase(Pk3Index index) => _index = index;
 
     public static string PathFor(string characterCode, string variantCode) =>
         $"{Dir}{characterCode}_{variantCode}_def.cfg";
@@ -70,6 +73,17 @@ public sealed class DefStore
         var b = GetOrAdd(variant);
         b.Def = def;
         b.Dirty = true;
+    }
+
+    /// <summary>
+    /// Drops the unsaved config edits of one variant: back to the file it was read from, or removed when it never had one.
+    /// </summary>
+    public void ResetBinding(Block variant)
+    {
+        if (!_bindings.TryGetValue(variant, out var b)) return;
+        if (b.Origin == null) { _bindings.Remove(variant); return; }
+        b.Def = null;
+        b.Dirty = false;
     }
 
     public void MarkDirty(Block variant) => GetOrAdd(variant).Dirty = true;

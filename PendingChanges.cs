@@ -8,6 +8,9 @@ public sealed class PendingChanges
 {
     private readonly Dictionary<string, byte[]> _items = new(StringComparer.OrdinalIgnoreCase);
 
+    // Paths where an in-memory entry replaced a real (pk3 or loose) file of the same path, e.g. by a case-only rename.
+    private readonly HashSet<string> _realUnder = new(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyDictionary<string, byte[]> Items => _items;
     public bool Any => _items.Count > 0;
 
@@ -19,5 +22,16 @@ public sealed class PendingChanges
 
     public bool Remove(string path) => _items.Remove(Key(path));
 
-    public void Clear() => _items.Clear();
+    /// <summary>Remembers that a real file still lies underneath the in-memory entry at <paramref name="path"/>.</summary>
+    public void MarkRealUnder(string path) => _realUnder.Add(Key(path));
+
+    public bool IsRealUnder(string path) => _realUnder.Contains(Key(path));
+
+    /// <summary>Registers every staged item (deletions included, as zero-length entries) in a freshly built index.</summary>
+    public void ReplayInto(Pk3Index index)
+    {
+        foreach (var (path, data) in _items) index.AddMemory(path, data);
+    }
+
+    public void Clear() { _items.Clear(); _realUnder.Clear(); }
 }

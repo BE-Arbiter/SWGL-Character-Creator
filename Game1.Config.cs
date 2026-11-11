@@ -10,7 +10,7 @@ public partial class Game1
 {
     private const string ModalNewVariantConfig = "New variant config";
     private const int MaxCopyRows = 200;
-    private const int CopyLoadsPerFrame = 40;
+    private const int CopyLoadsPerFrame = 8;
 
     private static readonly Vec4 WarnColor = new(1f, 0.65f, 0.2f, 1f);
 
@@ -28,7 +28,7 @@ public partial class Game1
     {
         chosen = current;
         var key = ImGui.GetID(id);
-        if (!ImGui.BeginCombo("##" + id, current.Length > 0 ? current : "(none)"))
+        if (!ImGui.BeginCombo("##" + id, current.Length > 0 ? current : "(none)", ImGuiComboFlags.HeightLargest))
         {
             _comboFilters.Remove(key);
             return false;
@@ -111,6 +111,9 @@ public partial class Game1
         ImGui.TextDisabled(_index!.Files.TryGetValue(path, out var entry) && entry.Size > 0
             ? $"Source: {entry.Pk3Folder}/{entry.Pk3Name}"
             : "(new, not saved)");
+        if (!defs.IsDirty(b)) ImGui.BeginDisabled();
+        if (ImGui.Button("Discard config changes")) defs.ResetBinding(b);
+        if (!defs.IsDirty(b)) ImGui.EndDisabled();
 
         var def = defs.Load(b);
         if (def == null)
@@ -176,14 +179,22 @@ public partial class Game1
         ImGui.EndTable();
     }
 
-    /// <summary>Integer field that commits on Enter / focus loss, so a half-typed value is never clamped mid-edit.</summary>
-    private static bool IntField(string id, string? value, int min, out string result)
+    private readonly Dictionary<uint, int> _intScratch = new();
+
+    /// <summary>
+    /// Integer text field (no +/- buttons). The typed value lives in a scratch int while the field is being edited and is
+    /// committed, clamped to <paramref name="min"/>, on Enter or when the field loses focus.
+    /// </summary>
+    private bool IntField(string id, string? value, int min, out string result)
     {
-        int v = DefEditorLogic.ParseInt(value, min);
         result = "";
+        var key = ImGui.GetID(id);
+        int v = _intScratch.TryGetValue(key, out var scratch) ? scratch : DefEditorLogic.ParseInt(value, min);
         ImGui.SetNextItemWidth(-1);
-        bool changed = ImGui.InputInt(id, ref v, 1, 10, ImGuiInputTextFlags.EnterReturnsTrue) || ImGui.IsItemDeactivatedAfterEdit();
-        if (!changed) return false;
+        if (ImGui.InputInt(id, ref v, 0, 0)) _intScratch[key] = v;
+        bool enter = ImGui.IsItemActive() && (ImGui.IsKeyPressed(ImGuiKey.Enter) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter));
+        if (!ImGui.IsItemDeactivatedAfterEdit() && !enter) return false;
+        _intScratch.Remove(key);
         result = Math.Max(v, min).ToString();
         return result != value;
     }
