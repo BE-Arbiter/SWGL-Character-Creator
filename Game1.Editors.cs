@@ -952,7 +952,7 @@ public partial class Game1
         var path = ValidatedPath(category, typed, null);
         var pf = new ParsedFile
         {
-            Entry = _index!.AddMemory(path, Array.Empty<byte>()),
+            Entry = EditStaging.Create(_pending, _index!, path),
             IsNew = true,
             Dirty = true,
         };
@@ -964,7 +964,7 @@ public partial class Game1
     }
 
     /// <summary>
-    /// Renames by staging the current content under the new name. A file that already existed is also staged
+    /// Renames by staging the current content under the new name. A real (pk3 or loose) file is also staged
     /// for deletion at its old path.
     /// </summary>
     private void RenameFile(Node fileNode, Node category, string typed)
@@ -974,11 +974,8 @@ public partial class Game1
         var old = pf.Entry;
         if (newPath.Equals(old.Path, StringComparison.OrdinalIgnoreCase) && newPath == old.Path) return;
 
-        pf.Entry = _index!.AddMemory(newPath, System.Text.Encoding.Latin1.GetBytes(pf.Config.Serialize()));
+        pf.Entry = EditStaging.Rename(_pending, _index!, old, newPath, System.Text.Encoding.Latin1.GetBytes(pf.Config.Serialize()));
         pf.Dirty = true;
-        _pending.Remove(newPath);
-        if (!pf.IsNew) _pending.StageDelete(old.Path);
-        else _index.Remove(old.Path); // the never-saved placeholder at the old name
         category.Children.Remove(fileNode);
         InsertSorted(category, fileNode);
         _selected = fileNode;
