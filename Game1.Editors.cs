@@ -543,8 +543,8 @@ public partial class Game1
             ImGui.SameLine();
             if (IconButton("##commit", true))
             {
-                // V validates: writes a loose copy of the .str with only the edited lines changed.
-                if (!sf.Dirty || SaveStr(sf)) _editingTr.Remove(keyProp);
+                // V validates: the edit stays pending in the cached .str (sf.Dirty).
+                _editingTr.Remove(keyProp);
             }
         }
         ImGui.TextDisabled($"{sf.Entry.Path}  ({sf.Entry.Pk3Folder}/{sf.Entry.Pk3Name})  REFERENCE {entry.Reference}");
@@ -581,16 +581,6 @@ public partial class Game1
             ImGui.PopID();
         }
         ImGui.PopID();
-    }
-
-    /// <summary>Writes the .str as a loose file and forces a reload from it.</summary>
-    private bool SaveStr(StrFile sf)
-    {
-        if (WriteLoose(sf.Entry.Path, sf.Serialize()) == null) return false;
-        sf.Dirty = false;
-        _strCache.Remove(sf.Entry.Path);
-        _factionTitles = null;
-        return true;
     }
 
     // ---------------------------------------------------------------- modals
@@ -695,7 +685,8 @@ public partial class Game1
         if (sf.Find(reference) != null) throw new InvalidOperationException($"{reference} already exists in {_mStrName}.");
 
         sf.AddEntry(reference, "ENGLISH", EscapeStr(_mText));
-        if (!SaveStr(sf)) throw new InvalidOperationException(_status);
+        sf.Dirty = true;
+        _factionTitles = null;
 
         var p = _mProp!;
         bool upper = p.Key.StartsWith("description", StringComparison.OrdinalIgnoreCase);
@@ -730,7 +721,9 @@ public partial class Game1
         if (free.Count > 0 && ImGui.Button("Add"))
         {
             _mStr!.AddLanguage(_mEntry!, _mLang, EscapeStr(_mText));
-            if (SaveStr(_mStr)) ImGui.CloseCurrentPopup();
+            _mStr.Dirty = true;
+            _factionTitles = null;
+            ImGui.CloseCurrentPopup();
         }
         if (free.Count > 0) ImGui.SameLine();
         if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
@@ -953,14 +946,13 @@ public partial class Game1
         if (index < 0) category.Children.Add(file); else category.Children.Insert(index, file);
     }
 
-    /// <summary>New empty file in the explorer; it is written to SWGL/ with the next Save.</summary>
+    /// <summary>New empty file in the explorer; it stays pending until the changes are saved.</summary>
     private void CreateFile(Node category, string typed)
     {
         var path = ValidatedPath(category, typed, null);
-        var disk = Path.Combine(_gameDir!, "SWGL", path.Replace('/', Path.DirectorySeparatorChar));
         var pf = new ParsedFile
         {
-            Entry = new Pk3Entry(path, "(new)", "SWGL", 0, disk, path, IsLoose: true),
+            Entry = _index!.AddMemory(path, Array.Empty<byte>()),
             IsNew = true,
             Dirty = true,
         };
@@ -972,8 +964,8 @@ public partial class Game1
     }
 
     /// <summary>
-    /// Renames by writing the current content under the new name. The old path is deleted when it was only a
-    /// loose file; otherwise (it lives in a pk3, which is never modified) it is overridden by an empty loose file.
+    /// Renames by staging the current content under the new name. A file that already existed is also staged
+    /// for deletion at its old path.
     /// </summary>
     private void RenameFile(Node fileNode, Node category, string typed)
     {
@@ -982,22 +974,11 @@ public partial class Game1
         var old = pf.Entry;
         if (newPath.Equals(old.Path, StringComparison.OrdinalIgnoreCase) && newPath == old.Path) return;
 
-        var created = WriteLoose(newPath, pf.Config.Serialize()) ?? throw new InvalidOperationException(_status);
-
-        if (!pf.IsNew)
-        {
-            if (old.IsLoose && !_index!.IsShadowed(old.Path))
-            {
-                try { File.Delete(old.Pk3FullPath); } catch { /* the empty override below is used instead */ }
-                if (File.Exists(old.Pk3FullPath)) WriteLoose(old.Path, "");
-                else _index.Remove(old.Path);
-            }
-            else WriteLoose(old.Path, "");
-        }
-
-        pf.Entry = created;
-        pf.IsNew = false;
-        pf.Dirty = false;
+        pf.Entry = _index!.AddMemory(newPath, System.Text.Encoding.Latin1.GetBytes(pf.Config.Serialize()));
+        pf.Dirty = true;
+        _pending.Remove(newPath);
+        if (!pf.IsNew) _pending.StageDelete(old.Path);
+        else _index.Remove(old.Path); // the never-saved placeholder at the old name
         category.Children.Remove(fileNode);
         InsertSorted(category, fileNode);
         _selected = fileNode;

@@ -25,6 +25,7 @@ public partial class Game1 : Game
     private volatile bool _indexing;
     private (int done, int total, string current) _progress;
     private string _status = NoFolderMessage;
+    private PendingChanges _pending = new();   // edits staged in memory, reset whenever the folder is re-indexed
     private int _loadGeneration;   // bumped by every SetGameDir so that a stale indexing run is ignored
 
     private static readonly string NoFolderMessage =
@@ -66,7 +67,8 @@ public partial class Game1 : Game
     protected override void LoadContent()
     {
         _imgui = new ImGuiRenderer(this);
-        _images = new ImageStore(GraphicsDevice, _imgui, () => _index, () => _gameDir);
+        _images = new ImageStore(GraphicsDevice, _imgui, () => _index,
+            (p, b) => { _pending.Stage(p, b); _index!.AddMemory(p, b); }, p => _pending.Remove(p));
         _viewer = new ModelViewer(GraphicsDevice, _imgui, _images);
 
         var saved = _settings.GameDataPath;
@@ -93,6 +95,7 @@ public partial class Game1 : Game
     private void SetGameDir(string dir)
     {
         _gameDir = dir;
+        _pending = new PendingChanges();
         _settings.GameDataPath = dir;
         _settings.Save();
         _index = null;
@@ -374,10 +377,6 @@ public partial class Game1 : Game
         if (f.Error != null) ImGui.TextColored(new Vec4(1f, 0.4f, 0.4f, 1f), "Read error: " + f.Error);
 
         if (!f.Dirty) ImGui.BeginDisabled();
-        if (ImGui.Button("Save")) SaveFile(f);
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Writes a loose file to SWGL/" + f.Entry.Path + " (pk3 files are never modified).");
-        ImGui.SameLine();
         if (ImGui.Button("Discard changes")) RevertFile(f);
         if (!f.Dirty) ImGui.EndDisabled();
         ImGui.Separator();
@@ -479,33 +478,6 @@ public partial class Game1 : Game
     }
 
     // ---------------------------------------------------------------- saving
-
-    private void SaveFile(ParsedFile f)
-    {
-        var loose = WriteLoose(f.Entry.Path, f.Config.Serialize());
-        if (loose == null) return;
-        f.Dirty = false;
-        f.Entry = loose; // later reverts reload the saved loose file
-        f.IsNew = false;
-    }
-
-    /// <summary>pk3 files are never modified: edits are written as loose files under SWGL/ and registered in the index.</summary>
-    private Pk3Entry? WriteLoose(string entryPath, string text)
-    {
-        try
-        {
-            var path = GameLocator.LoosePath(_gameDir!, entryPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, text, System.Text.Encoding.Latin1);
-            _status = "Saved: " + path;
-            return _index!.AddLoose(entryPath, path);
-        }
-        catch (Exception ex)
-        {
-            _status = "Save failed: " + ex.Message;
-            return null;
-        }
-    }
 
     private void RevertFile(ParsedFile f)
     {
