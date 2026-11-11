@@ -40,8 +40,9 @@ public partial class Game1
     private void BeginSave()
     {
         if (_gameDir == null || _index == null || _indexing) return;
+        _defs?.Prune(ChaConfigs());
         var changes = CollectChanges();
-        if (changes.Count == 0) return;
+        if (changes.Count == 0) { _status = "Nothing to save."; return; }
         List<string> masking;
         try { masking = SavePlan.FindMaskingLoose(_gameDir, changes.Keys); }
         catch (Exception ex) { _status = "Save failed: " + ex.Message; return; }

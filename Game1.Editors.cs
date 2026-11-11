@@ -496,6 +496,7 @@ public partial class Game1
             b.Children.Remove(remove.Block!);
             n.Children.Remove(remove);
             f.Dirty = true;
+            _defs?.Prune(ChaConfigs());
         }
 
         if (ImGui.Button("Add variant"))
@@ -1159,6 +1160,7 @@ public partial class Game1
             else sourceParent.File!.Config.Blocks.Remove(src.Block!);
             sourceParent.Children.Remove(src);
             sourceParent.File!.Dirty = true;
+            _defs?.Prune(ChaConfigs());
         }
 
         // Show the result: expand its ancestors and select it.

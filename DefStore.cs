@@ -128,6 +128,14 @@ public sealed class DefStore
         }
     }
 
+    /// <summary>Drops bindings that are no longer in any file and have no origin: they can never produce output.</summary>
+    public void Prune(IEnumerable<ConfigFile> chaFiles)
+    {
+        var liveBlocks = new HashSet<Block>(chaFiles.SelectMany(Variants).Select(l => l.variant));
+        foreach (var block in _bindings.Where(kv => kv.Value.Origin == null && !liveBlocks.Contains(kv.Key)).Select(kv => kv.Key).ToList())
+            _bindings.Remove(block);
+    }
+
     private Binding GetOrAdd(Block variant)
     {
         if (!_bindings.TryGetValue(variant, out var b)) _bindings[variant] = b = new Binding();

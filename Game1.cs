@@ -498,6 +498,7 @@ public partial class Game1 : Game
         f.Error = fresh.Error;
         f.Dirty = false;
         if (IsChaPath(f.Entry.Path) && f.Error == null) _defs?.Bind(f.Config);
+        if (IsChaPath(f.Entry.Path)) _defs?.Prune(ChaConfigs());
 
         // Rebuild the file's subtree against the reloaded blocks, keeping the file node itself.
         var node = _roots.SelectMany(r => r.Children).First(c => c.File == f);

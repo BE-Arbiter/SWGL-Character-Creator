@@ -136,4 +136,76 @@ public class DefStoreTests
         var c = s.CollectChanges(new[] { f });
         Assert.Equal("ui_force 9", Text(c[DefStore.PathFor("AAYLA", "DEFAULT")]));
     }
+
+    private static (DefStore s, ConfigFile f, Block ch, Block def) Setup2()
+    {
+        var (s, f, ch, def, _) = Setup();
+        return (s, f, ch, def);
+    }
+
+    private static Block CloneVariant(DefStore s, Block src, ConfigFile into, Block intoChar, string code)
+    {
+        var clone = ConfigFile.Parse(Cha).Blocks[0].Children[0];
+        SetCode(clone, code);
+        intoChar.Children.Add(clone);
+        s.CopyDefs(src, clone);
+        return clone;
+    }
+
+    [Fact] public void Prune_DropsOrphanCopy()
+    {
+        var (s, f, ch, def) = Setup2();
+        var clone = CloneVariant(s, def, f, ch, "COPY");
+        ch.Children.Remove(clone);
+        s.Prune(new[] { f });
+        Assert.False(s.AnyDirty);
+        Assert.Empty(s.CollectChanges(new[] { f }));
+    }
+
+    [Fact] public void UnbindBind_AfterOrphanCopy_NotDirty()
+    {
+        var (s, f, ch, def) = Setup2();
+        var clone = CloneVariant(s, def, f, ch, "COPY");
+        ch.Children.Remove(clone);
+        s.Prune(new[] { f });
+        s.Unbind(f);
+        var fresh = ConfigFile.Parse(Cha);
+        s.Bind(fresh);
+        Assert.False(s.AnyDirty);
+    }
+
+    [Fact] public void Prune_KeepsNonLiveBindingWithOrigin()
+    {
+        var (s, f, ch, _, alt) = Setup();
+        ch.Children.Remove(alt);
+        s.Prune(new[] { f });
+        var c = s.CollectChanges(new[] { f });
+        Assert.Single(c);
+        Assert.Empty(c[DefStore.PathFor("AAYLA", "ALT")]);
+    }
+
+    [Fact] public void CrossFileMove_OneWriteOneEmpty()
+    {
+        var (s, f, ch, def) = Setup2();
+        var other = ConfigFile.Parse("{\ncode OTHER\n}\n");
+        s.Bind(other);
+        var clone = CloneVariant(s, def, other, other.Blocks[0], "DEFAULT");
+        ch.Children.Remove(def);
+        s.Prune(new[] { f, other });
+        var c = s.CollectChanges(new[] { f, other });
+        Assert.Equal(2, c.Count);
+        Assert.Equal("ui_force 1", Text(c[DefStore.PathFor("OTHER", "DEFAULT")]));
+        Assert.Empty(c[DefStore.PathFor("AAYLA", "DEFAULT")]);
+    }
+
+    [Fact] public void DirtyDef_ThenUnbindBind_NotDirty()
+    {
+        var (s, f, _, def) = Setup2();
+        s.SetDef(def, DefFile.Parse("ui_force 9"));
+        s.Unbind(f);
+        var fresh = ConfigFile.Parse(Cha);
+        s.Bind(fresh);
+        Assert.False(s.AnyDirty);
+        Assert.Empty(s.CollectChanges(new[] { fresh }));
+    }
 }
