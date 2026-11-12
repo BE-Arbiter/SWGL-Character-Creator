@@ -238,4 +238,47 @@ public class DefStoreTests
         s.Rebase(ix2);
         Assert.Contains("7", s.Load(def)!.Serialize());
     }
+
+    [Fact] public void ResetAt_ResetsDirtyVariantAtPath()
+    {
+        var (s, f, _, def, alt) = Setup();
+        s.SetDef(def, DefFile.Parse("ui_force 9"));
+        s.SetDef(alt, DefFile.Parse("ui_force 8"));
+        var path = DefStore.PathFor("AAYLA", "DEFAULT");
+        Assert.True(s.CanResetAt(new[] { f }, path));
+        Assert.True(s.ResetAt(new[] { f }, path));
+        Assert.False(s.IsDirty(def));
+        Assert.True(s.IsDirty(alt));
+        Assert.Contains("1", s.Load(def)!.Serialize());
+        Assert.False(s.CanResetAt(new[] { f }, path));
+    }
+
+    [Fact] public void ResetAt_IgnoresRenameOnlyWrites()
+    {
+        var (s, f, _, def, _) = Setup();
+        SetCode(def, "NEW");
+        Assert.False(s.CanResetAt(new[] { f }, DefStore.PathFor("AAYLA", "NEW")));
+        Assert.False(s.ResetAt(new[] { f }, DefStore.PathFor("AAYLA", "DEFAULT")));
+    }
+
+    [Fact] public void DirtyVariantAt_FindsEditedVariant()
+    {
+        var (s, f, _, def, _) = Setup();
+        var path = DefStore.PathFor("AAYLA", "DEFAULT");
+        Assert.Null(s.DirtyVariantAt(new[] { f }, path));
+        s.SetDef(def, DefFile.Parse("ui_force 9"));
+        Assert.Same(def, s.DirtyVariantAt(new[] { f }, path));
+    }
+
+    [Fact] public void EnsureBound_RestoredVariantLoadsSavedDef()
+    {
+        var (s, f, ch, def, _) = Setup();
+        ch.Children.Remove(def);
+        s.Prune(new[] { f });
+        var restored = ConfigFile.Parse(Cha).Blocks[0].Children[0];   // same code, new object
+        ch.Children.Insert(0, restored);
+        s.EnsureBound(f);
+        Assert.Contains("1", s.Load(restored)!.Serialize());
+        Assert.Empty(s.CollectChanges(new[] { f }));
+    }
 }

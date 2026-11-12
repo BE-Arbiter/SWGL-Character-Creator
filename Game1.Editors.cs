@@ -104,7 +104,6 @@ public partial class Game1
         var f = n.File!;
         ImGui.TextUnformatted(b.Type.Length > 0 ? b.Type : "Character");
         if (b.Children.Count > 0) { ImGui.SameLine(); ImGui.TextDisabled($"- {b.Children.Count} sub-item(s)"); }
-        DrawTransferButtons(n);
         if (b.Type == "Variant" && b.Props.All(p => !p.Key.Equals("specie", StringComparison.OrdinalIgnoreCase)))
         {
             if (ImGui.Button("Add Specie"))
@@ -478,7 +477,6 @@ public partial class Game1
         ImGui.Separator();
         ImGui.TextDisabled($"Variants ({n.Children.Count})");
 
-        Node? remove = null;
         foreach (var c in n.Children)
         {
             ImGui.PushID(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(c));
@@ -488,37 +486,11 @@ public partial class Game1
                 _selected = c;
             }
             ImGui.SameLine();
-            if (ImGui.SmallButton("x")) remove = c;
+            if (ImGui.SmallButton("x")) AskDelete(c);   // asks first
             ImGui.PopID();
         }
-        if (remove != null)
-        {
-            b.Children.Remove(remove.Block!);
-            n.Children.Remove(remove);
-            f.Dirty = true;
-            _defs?.Prune(ChaConfigs());
-        }
 
-        if (ImGui.Button("Add variant"))
-        {
-            var first = b.Children.FirstOrDefault();
-            string code = "VARIANT" + (b.Children.Count + 1);
-            var v = new Block { Type = "Variant" };
-            v.Props.Add(new Prop { Key = "code", Value = code });
-            v.Props.Add(new Prop { Key = "name", Value = b.Get("name") ?? code, Quoted = true });
-            v.Props.Add(new Prop { Key = "icon", Value = first?.Get("icon") ?? b.Get("icon") ?? "" });
-            v.Props.Add(new Prop { Key = "model", Value = first?.Get("model") ?? "" });
-            v.Props.Add(new Prop { Key = "skin", Value = first?.Get("skin") ?? "model_default" });
-            v.Props.Add(new Prop { Key = "descriptionKey", Value = first?.Get("descriptionKey") ?? "" });
-            v.Props.Add(new Prop { Key = "specie", Value = first?.Get("specie") ?? "", Quoted = true });
-            b.Children.Add(v);
-            var node = Node.BuildBlock(v, f);
-            n.Children.Add(node);
-            _expanded.Add(n);
-            _selected = node;
-            f.Dirty = true;
-            OpenNewVariantConfig(v);
-        }
+        if (ImGui.Button("Add variant")) AddVariant(n);
     }
 
     // ---------------------------------------------------------------- translation block
@@ -640,6 +612,7 @@ public partial class Game1
         DrawTransferModal();
         DrawFileNameModal();
         DrawNewVariantConfigModal();
+        DrawDeleteModal();
     }
 
     private void ModalError()
@@ -1030,18 +1003,6 @@ public partial class Game1
     private string _tFilter = "";
 
     private static bool IsTransferable(Node n) => n.Kind == NodeKind.Block && IsCharacterFile(n);
-
-    /// <summary>"Copy to" / "Move to" above the properties of a character (target: a file) or a variant (target: a character).</summary>
-    private void DrawTransferButtons(Node n)
-    {
-        if (!IsTransferable(n)) return;
-        bool variant = n.Block!.Type == "Variant";
-        if (ImGui.Button("Copy to")) OpenTransfer(n, move: false);
-        ImGui.SameLine();
-        if (ImGui.Button("Move to")) OpenTransfer(n, move: true);
-        ImGui.SameLine();
-        ImGui.TextDisabled(variant ? "(to another character)" : "(to a file)");
-    }
 
     private void OpenTransfer(Node n, bool move)
     {

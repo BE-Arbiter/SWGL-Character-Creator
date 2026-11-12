@@ -221,6 +221,7 @@ public partial class Game1 : Game
                 if (ImGui.MenuItem("Quit")) RunOrConfirm(QuitNow);
                 ImGui.EndMenu();
             }
+            DrawMainMenus();
             ImGui.EndMainMenuBar();
         }
 
@@ -353,6 +354,8 @@ public partial class Game1 : Game
     /// <summary>Shows the selected element's icon; an invalid path shows nothing.</summary>
     private void DrawAssetPreview()
     {
+        if (_selected is { } node && DrawGridFor(node)) return;
+
         if (_selected?.Block is { } sel && sel.Get("model") != null)
         {
             DrawModelPreview(sel);
