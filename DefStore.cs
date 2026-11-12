@@ -86,6 +86,22 @@ public sealed class DefStore
         b.Dirty = false;
     }
 
+    /// <summary>
+    /// Drops the unsaved config edits of the live variants whose def is written at <paramref name="path"/>.
+    /// Writes caused only by a variant rename, move or delete are left alone (they follow the .cha file). Returns true if any was reset.
+    /// </summary>
+    public bool ResetAt(IEnumerable<ConfigFile> chaFiles, string path)
+    {
+        bool any = false;
+        foreach (var (variant, p) in chaFiles.SelectMany(Variants).ToList())
+            if (p.Equals(path, StringComparison.OrdinalIgnoreCase) && IsDirty(variant)) { ResetBinding(variant); any = true; }
+        return any;
+    }
+
+    /// <summary>True when <see cref="ResetAt"/> would reset something.</summary>
+    public bool CanResetAt(IEnumerable<ConfigFile> chaFiles, string path) =>
+        chaFiles.SelectMany(Variants).Any(v => v.path.Equals(path, StringComparison.OrdinalIgnoreCase) && IsDirty(v.variant));
+
     public void MarkDirty(Block variant) => GetOrAdd(variant).Dirty = true;
 
     public bool IsDirty(Block variant) => _bindings.TryGetValue(variant, out var b) && b.Dirty;
