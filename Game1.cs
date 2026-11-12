@@ -221,6 +221,7 @@ public partial class Game1 : Game
                 if (ImGui.MenuItem("Quit")) RunOrConfirm(QuitNow);
                 ImGui.EndMenu();
             }
+            DrawMainMenus();
             ImGui.EndMainMenuBar();
         }
 

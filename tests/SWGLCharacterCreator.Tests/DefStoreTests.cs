@@ -260,4 +260,25 @@ public class DefStoreTests
         Assert.False(s.CanResetAt(new[] { f }, DefStore.PathFor("AAYLA", "NEW")));
         Assert.False(s.ResetAt(new[] { f }, DefStore.PathFor("AAYLA", "DEFAULT")));
     }
+
+    [Fact] public void DirtyVariantAt_FindsEditedVariant()
+    {
+        var (s, f, _, def, _) = Setup();
+        var path = DefStore.PathFor("AAYLA", "DEFAULT");
+        Assert.Null(s.DirtyVariantAt(new[] { f }, path));
+        s.SetDef(def, DefFile.Parse("ui_force 9"));
+        Assert.Same(def, s.DirtyVariantAt(new[] { f }, path));
+    }
+
+    [Fact] public void EnsureBound_RestoredVariantLoadsSavedDef()
+    {
+        var (s, f, ch, def, _) = Setup();
+        ch.Children.Remove(def);
+        s.Prune(new[] { f });
+        var restored = ConfigFile.Parse(Cha).Blocks[0].Children[0];   // same code, new object
+        ch.Children.Insert(0, restored);
+        s.EnsureBound(f);
+        Assert.Contains("1", s.Load(restored)!.Serialize());
+        Assert.Empty(s.CollectChanges(new[] { f }));
+    }
 }

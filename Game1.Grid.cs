@@ -57,12 +57,32 @@ public partial class Game1
     private void DrawTileGrid(string title, string? headerIcon, List<Node> items)
     {
         var dl = ImGui.GetWindowDrawList();
-        if (headerIcon != null && _images.Get(headerIcon) is { } hi)
+        // Header: the selected element's own icon (preview), then the grid title.
+        if (headerIcon != null)
         {
-            float s = ImGui.GetTextLineHeight() * 2;
-            ImGui.Image(hi.Id, new Vec2(s, s));
+            var hi = _images.Get(headerIcon);
+            var q0 = ImGui.GetCursorScreenPos();
+            var q1 = q0 + new Vec2(PreviewIconSize, PreviewIconSize);
+            if (hi != null) ImGui.Image(hi.Id, new Vec2(PreviewIconSize, PreviewIconSize));
+            else
+            {
+                ImGui.Dummy(new Vec2(PreviewIconSize, PreviewIconSize));
+                dl.AddRectFilled(q0, q1, ImGui.GetColorU32(new Vec4(0.2f, 0.2f, 0.24f, 1f)), 4f);
+            }
+            dl.AddRect(q0, q1, ImGui.GetColorU32(new Vec4(1, 1, 1, 0.9f)));
             ImGui.SameLine();
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (s - ImGui.GetTextLineHeight()) / 2);
+            ImGui.BeginGroup();
+            ImGui.TextUnformatted("Icon");
+            if (hi != null)
+            {
+                ImGui.TextDisabled($"{hi.Width} x {hi.Height}");
+                ImGui.PushTextWrapPos(0);
+                ImGui.TextDisabled(hi.Source.Replace("%", "%%"));
+                ImGui.PopTextWrapPos();
+            }
+            else ImGui.TextDisabled(headerIcon.Length == 0 ? "(none)" : "Not found: " + headerIcon.Replace("%", "%%"));
+            ImGui.EndGroup();
+            ImGui.Spacing();
         }
         ImGui.TextUnformatted($"{title} ({items.Count})");
         ImGui.Separator();
@@ -75,6 +95,7 @@ public partial class Game1
 
         if (ImGui.BeginChild("##tiles", Vec2.Zero))
         {
+            dl = ImGui.GetWindowDrawList();   // the child's own list: tiles are clipped to the scrolling area, not drawn over the header
             int cols = Math.Max(1, (int)((ImGui.GetContentRegionAvail().X + spacing) / (cell.X + spacing)));
             uint frame = ImGui.GetColorU32(ImGuiCol.Border);
             uint text = ImGui.GetColorU32(ImGuiCol.Text);
